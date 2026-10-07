@@ -13,4 +13,10 @@ import com.hmdp.entity.Shop;
  */
 public interface IShopService extends IService<Shop> {
 
+    /**
+     * 根据 id 查询商铺，优先查缓存，缓存未命中再查数据库并回填
+     * @param id 商铺id
+     * @return 商铺，不存在返回 null
+     */
+    Shop queryById(Long id);
 }

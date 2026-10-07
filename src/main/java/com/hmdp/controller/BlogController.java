@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * <p>
@@ -71,13 +73,26 @@ public class BlogController {
                 .page(new Page<>(current, SystemConstants.MAX_PAGE_SIZE));
         // 获取当前页数据
         List<Blog> records = page.getRecords();
-        // 查询用户
-        records.forEach(blog ->{
-            Long userId = blog.getUserId();
-            User user = userService.getById(userId);
-            blog.setName(user.getNickName());
-            blog.setIcon(user.getIcon());
-        });
+        // 收集这一页涉及的所有作者 id 并去重（同一作者发多条只查一次）
+        List<Long> userIds = records.stream()
+                .map(Blog::getUserId)
+                .distinct()
+                .collect(Collectors.toList());
+        // 空列表直接返回，避免 in () 语法错误
+        if (userIds.isEmpty()) {
+            return Result.ok(records);
+        }
+        // 一次 IN 查询拿回所有作者，组装成 id -> User 的 Map
+        Map<Long, User> userMap = userService.listByIds(userIds).stream()
+                .collect(Collectors.toMap(User::getId, user -> user));
+        // 遍历笔记，从 Map 取作者信息，不再单独查库（消除 N+1）
+        for (Blog blog : records) {
+            User user = userMap.get(blog.getUserId());
+            if (user != null) {
+                blog.setName(user.getNickName());
+                blog.setIcon(user.getIcon());
+            }
+        }
         return Result.ok(records);
     }
 }

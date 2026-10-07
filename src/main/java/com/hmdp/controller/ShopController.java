@@ -33,7 +33,12 @@ public class ShopController {
      */
     @GetMapping("/{id}")
     public Result queryShopById(@PathVariable("id") Long id) {
-        return Result.ok(shopService.getById(id));
+        Shop shop = shopService.queryById(id);
+        // 店铺不存在时返回失败，而不是 success=true 但 data=null 的矛盾状态
+        if (shop == null) {
+            return Result.fail("店铺不存在");
+        }
+        return Result.ok(shop);
     }
 
     /**

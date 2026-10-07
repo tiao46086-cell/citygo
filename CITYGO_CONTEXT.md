@@ -483,9 +483,17 @@ Phase 2 内容：
    - [x] 发送验证码 POST /user/code
    - [x] 验证码登录 POST /user/login
    - [x] 登录拦截器 + GET /user/me
-   - [ ] 改为 Redis + token
-2. 修 Phase 1 发现的小问题：店铺不存在时返回失败、热门笔记 N+1 查询等
-3. 基础整理：项目改名为 CityGo 等，前两项做完再定
+   - [x] 改为 Redis + token（token 存的 UserDTO Hash，双拦截器 Refresh/Login）
+2. 商户缓存（原课程在登录后即做，属 Phase 4「Redis 缓存体系整理」方向，提前开始）
+   - [x] queryById 缓存旁路（Cache Aside）：GET /shop/{id} 先查 cache:shop:{id}，miss 落库回填，TTL 30 分钟
+   - [x] 缓存穿透：查库 miss 时写入空串占位缓存（TTL 2 分钟），命中空值直接返回不再打库
+   - [x] 缓存击穿：setnx 互斥锁（lock:shop:{id}），miss 抢锁，抢到查库回填删锁，没抢到 sleep 后重查缓存
+   - [x] 缓存雪崩：缓存 TTL 加 RandomUtil 随机抖动（0~5 分钟），错开过期时间
+   - [x] 商户类型缓存 ShopType：queryList() 整份列表存 cache:shop:type:，旁路缓存 + TTL 30 分钟（类型数据量小固定，未套用三件套）
+3. 修 Phase 1 发现的小问题
+   - [x] 店铺不存在时返回失败：GET /shop/{id} 查不到时返回 Result.fail("店铺不存在")，不再返回 success=true 但 data=null
+   - [x] 热门笔记 N+1 查询：queryHotBlog 由「循环 getById 查用户」改为「收集去重 userId → 一次 listByIds(IN) → Map 组装」，从 N+1 条 SQL 降为 2 条，保留 author name/icon 填充
+4. 基础整理：项目改名为 CityGo（应用层：启动类 HmDianPingApplication→CityGoApplication、spring.application.name→citygo、artifactId→citygo；包名 com.hmdp 与数据库 schema hmdp 保留——纯内部实现，改名高风险无收益）
 
 CityGo 相对原课程的改动（登录部分）：
 
