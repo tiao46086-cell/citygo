@@ -482,7 +482,7 @@ Phase 2 内容：
 1. 补完登录：先用 Session 写通，再改成 Redis + token，并理解为什么要改
    - [x] 发送验证码 POST /user/code
    - [x] 验证码登录 POST /user/login
-   - [ ] 登录拦截器 + GET /user/me
+   - [x] 登录拦截器 + GET /user/me
    - [ ] 改为 Redis + token
 2. 修 Phase 1 发现的小问题：店铺不存在时返回失败、热门笔记 N+1 查询等
 3. 基础整理：项目改名为 CityGo 等，前两项做完再定
@@ -492,6 +492,7 @@ CityGo 相对原课程的改动（登录部分）：
 - Session 中同时保存验证码和手机号，登录时校验两者对应，修复「给 A 发的验证码可以登录 B」的问题
 - 登录成功后删除验证码，验证码只能使用一次
 - 修复 login.html 协议单选框缺少 id、点击无反应的问题
+- 收窄登录拦截器白名单：原课程用 /shop/**、/voucher/**、/upload/** 放行，导致新增/修改店铺、新增优惠券、上传图片不登录也能调用；CityGo 只放行只读接口（/shop/*、/shop/of/*、/voucher/list/* 等）。注意：目前只要求登录，尚未区分商家和普通用户
 
 在完成 Phase 2 之前：
 
