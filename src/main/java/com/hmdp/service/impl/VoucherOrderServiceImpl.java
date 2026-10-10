@@ -6,6 +6,7 @@ import com.hmdp.dto.Result;
 import com.hmdp.dto.VoucherOrderCancelMessage;
 import com.hmdp.dto.VoucherOrderCreateStatus;
 import com.hmdp.dto.VoucherOrderMessage;
+import com.hmdp.dto.VoucherOrderStatus;
 import com.hmdp.entity.VoucherOrder;
 import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.service.ISeckillVoucherService;
@@ -13,8 +14,12 @@ import com.hmdp.service.IVoucherOrderService;
 import com.hmdp.utils.RedisIdWorker;
 import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.AmqpAuthenticationException;
+import org.springframework.amqp.AmqpConnectException;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -22,7 +27,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
-import java.time.LocalDateTime;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -30,8 +35,10 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import static com.hmdp.utils.RedisConstants.SECKILL_HOLD_KEY;
 import static com.hmdp.utils.RedisConstants.SECKILL_LIMIT_KEY;
 import static com.hmdp.utils.RedisConstants.SECKILL_ORDER_KEY;
+import static com.hmdp.utils.RedisConstants.SECKILL_PENDING_KEY;
 import static com.hmdp.utils.RedisConstants.SECKILL_STOCK_KEY;
 import static com.hmdp.utils.RedisConstants.SECKILL_VOUCHER_KEY;
 
@@ -47,10 +54,6 @@ import static com.hmdp.utils.RedisConstants.SECKILL_VOUCHER_KEY;
 @Service
 public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, VoucherOrder> implements IVoucherOrderService {
 
-    /**
-     * 脚本内容不变，类加载时读一次 classpath 里的 seckill.lua。
-     * 返回值是 Lua 里的 return 数字，对应 Long。
-     */
     private static final DefaultRedisScript<Long> SECKILL_SCRIPT;
     private static final DefaultRedisScript<Long> RESTORE_SCRIPT;
     private static final DefaultRedisScript<Long> LIMIT_SCRIPT;
@@ -88,6 +91,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Resource
     private RabbitTemplate rabbitTemplate;
 
+    @Value("${citygo.seckill.unpaid-timeout:15m}")
+    private Duration unpaidTimeout;
+
     @Override
     public Result seckillVoucher(Long voucherId) {
         Long userId = UserHolder.getUser().getId();
@@ -100,13 +106,22 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if (allowed == null || allowed == 0L) {
             return Result.fail("操作太频繁，请稍后再试");
         }
-        // 1. 三个 key 的顺序要和 seckill.lua 的 KEYS[1] KEYS[2] KEYS[3] 一致
+        // 先有订单号，再预占。Redis 里的资格才能对上这一单
+        Long orderId = redisIdWorker.nextId("order");
         List<String> keys = Arrays.asList(
                 SECKILL_STOCK_KEY + voucherId,
                 SECKILL_ORDER_KEY + voucherId,
-                SECKILL_VOUCHER_KEY + voucherId
+                SECKILL_VOUCHER_KEY + voucherId,
+                SECKILL_HOLD_KEY + voucherId,
+                SECKILL_PENDING_KEY + orderId
         );
-        Long result = stringRedisTemplate.execute(SECKILL_SCRIPT, keys, userId.toString());
+        Long result = stringRedisTemplate.execute(
+                SECKILL_SCRIPT,
+                keys,
+                userId.toString(),
+                orderId.toString(),
+                voucherId.toString()
+        );
         if (result == null) {
             return Result.fail("秒杀失败");
         }
@@ -114,36 +129,67 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if (code != 0) {
             return Result.fail(seckillFailMessage(code));
         }
-        // 2. 先生成订单号再发消息。确认被接受后，页面拿到的就是即将入库的那个号
         VoucherOrderMessage message = new VoucherOrderMessage();
-        message.setOrderId(redisIdWorker.nextId("order"));
+        message.setOrderId(orderId);
         message.setUserId(userId);
         message.setVoucherId(voucherId);
-        CorrelationData correlationData = new CorrelationData(message.getOrderId().toString());
-        // 默认交换机，routing key 写成队列名，消息进入 seckill.order.queue
-        rabbitTemplate.convertAndSend(RabbitMqConfig.SECKILL_ORDER_QUEUE, message, correlationData);
+        CorrelationData correlationData = new CorrelationData(orderId.toString());
+        try {
+            rabbitTemplate.convertAndSend(RabbitMqConfig.SECKILL_ORDER_QUEUE, message, correlationData);
+        } catch (AmqpConnectException | AmqpAuthenticationException e) {
+            // 连接或账号在发出去之前就失败了，broker 里没有这条消息
+            log.error("秒杀消息没有发出去, orderId={}", orderId, e);
+            restoreSeckill(voucherId, userId, orderId);
+            return Result.fail("下单失败，请重试");
+        } catch (RuntimeException e) {
+            // 已经调用了发送，但不能确定进没进队列。预占留着，查询接口会看到处理中
+            log.error("秒杀消息发送结果不确定, orderId={}", orderId, e);
+            return Result.ok(orderId);
+        }
         try {
             CorrelationData.Confirm confirm = correlationData.getFuture().get(CONFIRM_WAIT_SECONDS, TimeUnit.SECONDS);
-            // ack 只说明交换机收到了。getReturned 非空说明路由失败，队列里没有这条消息
             boolean accepted = confirm != null && confirm.isAck() && correlationData.getReturned() == null;
             if (accepted) {
-                return Result.ok(message.getOrderId());
+                return Result.ok(orderId);
             }
-            log.error("秒杀消息被拒绝, orderId={}, confirm={}", message.getOrderId(), confirm);
+            log.error("秒杀消息被拒绝, orderId={}, confirm={}", orderId, confirm);
         } catch (TimeoutException e) {
-            // 确认没在 3 秒内回来。消息可能已经在队列里，回滚 Redis 会让同一个人再买一单
-            log.error("等待发布确认超时, orderId={}", message.getOrderId());
-            return Result.ok(message.getOrderId());
+            log.error("等待发布确认超时, orderId={}", orderId);
+            return Result.ok(orderId);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            log.error("等待发布确认被中断, orderId={}", message.getOrderId());
-            return Result.ok(message.getOrderId());
+            log.error("等待发布确认被中断, orderId={}", orderId);
+            return Result.ok(orderId);
         } catch (ExecutionException e) {
-            log.error("发布确认失败, orderId={}", message.getOrderId(), e);
-            return Result.ok(message.getOrderId());
+            log.error("发布确认失败, orderId={}", orderId, e);
+            return Result.ok(orderId);
         }
-        restoreSeckill(voucherId, userId);
+        restoreSeckill(voucherId, userId, orderId);
         return Result.fail("下单失败，请重试");
+    }
+
+    @Override
+    public Result queryOrder(Long orderId) {
+        Long userId = UserHolder.getUser().getId();
+        VoucherOrder order = getById(orderId);
+        if (order != null) {
+            if (!userId.equals(order.getUserId())) {
+                return Result.fail("订单不存在");
+            }
+            VoucherOrderStatus view = new VoucherOrderStatus();
+            view.setOrderId(orderId);
+            view.setStatus(order.getStatus());
+            view.setState(orderState(order));
+            return Result.ok(view);
+        }
+        String pending = stringRedisTemplate.opsForValue().get(SECKILL_PENDING_KEY + orderId);
+        if (pending != null && pending.startsWith(userId + ":")) {
+            VoucherOrderStatus view = new VoucherOrderStatus();
+            view.setOrderId(orderId);
+            view.setState("处理中");
+            return Result.ok(view);
+        }
+        return Result.fail("订单不存在");
     }
 
     @Override
@@ -154,9 +200,21 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             log.error("秒杀订单消息不完整: {}", message);
             return VoucherOrderCreateStatus.INVALID;
         }
-        // 同一个订单号再投递一次时，库存不能再减。主键冲突之前就返回
         if (getById(message.getOrderId()) != null) {
             log.info("秒杀订单已存在, orderId={}", message.getOrderId());
+            stringRedisTemplate.delete(SECKILL_PENDING_KEY + message.getOrderId());
+            return VoucherOrderCreateStatus.EXISTS;
+        }
+        // 先插入订单。主键冲突说明另一条相同消息已经在写，这次不能再扣库存
+        VoucherOrder voucherOrder = new VoucherOrder();
+        voucherOrder.setId(message.getOrderId());
+        voucherOrder.setUserId(message.getUserId());
+        voucherOrder.setVoucherId(message.getVoucherId());
+        try {
+            save(voucherOrder);
+        } catch (DuplicateKeyException e) {
+            log.info("秒杀订单已存在, orderId={}", message.getOrderId());
+            stringRedisTemplate.delete(SECKILL_PENDING_KEY + message.getOrderId());
             return VoucherOrderCreateStatus.EXISTS;
         }
         boolean success = seckillVoucherService.update()
@@ -166,29 +224,27 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 .update();
         if (!success) {
             log.error("秒杀订单入库失败，数据库库存不足，回滚 Redis, orderId={}", message.getOrderId());
-            restoreSeckill(message.getVoucherId(), message.getUserId());
+            removeById(message.getOrderId());
+            restoreSeckill(message.getVoucherId(), message.getUserId(), message.getOrderId());
             return VoucherOrderCreateStatus.STOCK_FAILED;
         }
-        VoucherOrder voucherOrder = new VoucherOrder();
-        voucherOrder.setId(message.getOrderId());
-        voucherOrder.setUserId(message.getUserId());
-        voucherOrder.setVoucherId(message.getVoucherId());
-        save(voucherOrder);
-        // 取消消息先进等待队列。确认被拒绝就抛异常，让上面的插入和扣库存一起回滚
         scheduleUnpaidCancel(message.getOrderId());
+        stringRedisTemplate.delete(SECKILL_PENDING_KEY + message.getOrderId());
         return VoucherOrderCreateStatus.CREATED;
     }
 
     @Override
     public Result payOrder(Long orderId) {
         Long userId = UserHolder.getUser().getId();
-        // 只改「这个人的、仍未支付」的订单。和取消消息抢的是同一行，谁先改掉 status=1 谁生效
+        long seconds = unpaidTimeout.getSeconds();
+        // 期限用数据库的 NOW()，避免 JVM 时区和 JDBC 的 UTC 差 8 小时
         boolean paid = update()
                 .set("status", ORDER_STATUS_PAID)
-                .set("pay_time", LocalDateTime.now())
+                .setSql("pay_time = NOW()")
                 .eq("id", orderId)
                 .eq("user_id", userId)
                 .eq("status", ORDER_STATUS_UNPAID)
+                .apply("create_time > DATE_SUB(NOW(), INTERVAL {0} SECOND)", seconds)
                 .update();
         if (paid) {
             return Result.ok();
@@ -203,17 +259,19 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if (order.getStatus() != null && order.getStatus() == ORDER_STATUS_CANCELLED) {
             return Result.fail("订单已取消");
         }
+        if (order.getStatus() != null && order.getStatus() == ORDER_STATUS_UNPAID && unpaidExpired(orderId)) {
+            return Result.fail("订单已超时");
+        }
         return Result.fail("订单无法支付");
     }
 
     @Override
     @Transactional
-    public void cancelUnpaidOrder(Long orderId) {
+    public void markOrderCancelled(Long orderId) {
         if (orderId == null) {
             log.error("取消消息没有订单号");
             return;
         }
-        // 只有未支付改得了。影响 0 行表示已支付、已取消，或订单不存在，不能再还库存
         boolean cancelled = update()
                 .set("status", ORDER_STATUS_CANCELLED)
                 .eq("id", orderId)
@@ -231,12 +289,20 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if (!stockRestored) {
             throw new IllegalStateException("秒杀库存回补失败, orderId=" + orderId);
         }
-        restoreSeckill(order.getVoucherId(), order.getUserId());
     }
 
-    /**
-     * 发到 seckill.order.delay。队列上的过期时间到了以后，RabbitMQ 把它转进取消队列。
-     */
+    @Override
+    public void restoreRedisIfCancelled(Long orderId) {
+        if (orderId == null) {
+            return;
+        }
+        VoucherOrder order = getById(orderId);
+        if (order == null || order.getStatus() == null || order.getStatus() != ORDER_STATUS_CANCELLED) {
+            return;
+        }
+        restoreSeckill(order.getVoucherId(), order.getUserId(), orderId);
+    }
+
     private void scheduleUnpaidCancel(Long orderId) {
         VoucherOrderCancelMessage cancelMessage = new VoucherOrderCancelMessage();
         cancelMessage.setOrderId(orderId);
@@ -258,21 +324,46 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
     }
 
-    /**
-     * 用户还在 seckill:order 的 Set 里时，库存加 1 并移出 Set。脚本是原子的，调用两次也只加一次。
-     */
-    private void restoreSeckill(Long voucherId, Long userId) {
+    private void restoreSeckill(Long voucherId, Long userId, Long orderId) {
         Long restored = stringRedisTemplate.execute(
                 RESTORE_SCRIPT,
-                Arrays.asList(SECKILL_STOCK_KEY + voucherId, SECKILL_ORDER_KEY + voucherId),
-                userId.toString()
+                Arrays.asList(
+                        SECKILL_STOCK_KEY + voucherId,
+                        SECKILL_HOLD_KEY + voucherId,
+                        SECKILL_PENDING_KEY + orderId
+                ),
+                userId.toString(),
+                orderId.toString()
         );
-        log.info("回滚秒杀资格, voucherId={}, userId={}, restored={}", voucherId, userId, restored);
+        log.info("回滚秒杀资格, voucherId={}, userId={}, orderId={}, restored={}", voucherId, userId, orderId, restored);
     }
 
-    /**
-     * 把 Lua 的返回码翻译成接口提示。数字含义写在 seckill.lua 顶部。
-     */
+    private boolean unpaidExpired(Long orderId) {
+        Long rows = query()
+                .eq("id", orderId)
+                .eq("status", ORDER_STATUS_UNPAID)
+                .apply("create_time <= DATE_SUB(NOW(), INTERVAL {0} SECOND)", unpaidTimeout.getSeconds())
+                .count();
+        return rows != null && rows > 0;
+    }
+
+    private String orderState(VoucherOrder order) {
+        Integer status = order.getStatus();
+        if (status != null && status == ORDER_STATUS_PAID) {
+            return "已支付";
+        }
+        if (status != null && status == ORDER_STATUS_CANCELLED) {
+            return "已取消";
+        }
+        if (status != null && status == ORDER_STATUS_UNPAID && unpaidExpired(order.getId())) {
+            return "已超时";
+        }
+        if (status != null && status == ORDER_STATUS_UNPAID) {
+            return "未支付";
+        }
+        return "未知";
+    }
+
     private String seckillFailMessage(int code) {
         if (code == 1) {
             return "库存不足";

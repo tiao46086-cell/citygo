@@ -23,6 +23,12 @@ public class RabbitMqConfig {
     public static final String SECKILL_ORDER_DELAY_QUEUE = "seckill.order.delay";
     public static final String SECKILL_ORDER_CANCEL_QUEUE = "seckill.order.cancel";
     public static final String SECKILL_ORDER_DLX = "seckill.order.dlx";
+    /** 消费失败后在这里等几秒，再由默认交换机送回原队列。不要改已经存在的业务队列参数 */
+    public static final String SECKILL_ORDER_RETRY_QUEUE = "seckill.order.retry";
+    public static final String SECKILL_ORDER_CANCEL_RETRY_QUEUE = "seckill.order.cancel.retry";
+    /** 超过重试次数后停在这里，没有消费者，方便事后对订单号 */
+    public static final String SECKILL_ORDER_FAIL_QUEUE = "seckill.order.fail";
+    public static final int SECKILL_RETRY_DELAY_MILLIS = 5000;
 
     /**
      * durable=true：RabbitMQ 重启后这个队列还在。
@@ -31,6 +37,32 @@ public class RabbitMqConfig {
     @Bean
     public Queue seckillOrderQueue() {
         return new Queue(SECKILL_ORDER_QUEUE, true);
+    }
+
+    @Bean
+    public Queue seckillOrderRetryQueue() {
+        return retryQueue(SECKILL_ORDER_RETRY_QUEUE, SECKILL_ORDER_QUEUE);
+    }
+
+    @Bean
+    public Queue seckillOrderCancelRetryQueue() {
+        return retryQueue(SECKILL_ORDER_CANCEL_RETRY_QUEUE, SECKILL_ORDER_CANCEL_QUEUE);
+    }
+
+    @Bean
+    public Queue seckillOrderFailQueue() {
+        return new Queue(SECKILL_ORDER_FAIL_QUEUE, true);
+    }
+
+    /**
+     * 到期后交给默认交换机，routing key 用原来的队列名，消息回到下单队列或取消队列。
+     */
+    private Queue retryQueue(String name, String backTo) {
+        Map<String, Object> args = new HashMap<>();
+        args.put("x-message-ttl", SECKILL_RETRY_DELAY_MILLIS);
+        args.put("x-dead-letter-exchange", "");
+        args.put("x-dead-letter-routing-key", backTo);
+        return new Queue(name, true, false, false, args);
     }
 
     /**

@@ -6,11 +6,11 @@ spring:
   datasource:
     driver-class-name: com.mysql.jdbc.Driver
     url: jdbc:mysql://127.0.0.1:3306/hmdp?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-    username: root
-    password: 1234
+    username: ${CITYGO_DB_USERNAME:root}
+    password: ${CITYGO_DB_PASSWORD:1234}
   redis:
-    host: 127.0.0.1
-    port: 6379
+    host: ${CITYGO_REDIS_HOST:127.0.0.1}
+    port: ${CITYGO_REDIS_PORT:6379}
     lettuce:
       pool:
         max-active: 10
@@ -21,8 +21,8 @@ spring:
     host: 127.0.0.1
     port: 5672
     # Docker 里的 RabbitMQ 不把宿主机连接当成 guest 的本机连接，所以不用 guest
-    username: citygo
-    password: citygo
+    username: ${CITYGO_RABBITMQ_USERNAME:citygo}
+    password: ${CITYGO_RABBITMQ_PASSWORD:citygo}
     # correlated：发送时带上 CorrelationData，才能按订单号等待 broker 的确认
     publisher-confirm-type: correlated
     publisher-returns: true
@@ -36,6 +36,8 @@ spring:
   jackson:
     default-property-inclusion: non_null # JSON处理时忽略非空字段
 citygo:
+  # 图片目录。不设环境变量时用项目里自带的页面图片
+  upload-dir: ${CITYGO_UPLOAD_DIR:src/main/resources/nginx-1.18.0/html/hmdp/imgs}
   seckill:
     # 未支付超过这段时间就取消。改数值后要删除队列 seckill.order.delay 再启动
     unpaid-timeout: 15m

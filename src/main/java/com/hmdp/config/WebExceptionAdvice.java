@@ -9,6 +9,12 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 @RestControllerAdvice
 public class WebExceptionAdvice {
 
+    @ExceptionHandler(IllegalStateException.class)
+    public Result handleIllegalState(IllegalStateException e) {
+        log.error(e.toString(), e);
+        return Result.fail(e.getMessage());
+    }
+
     @ExceptionHandler(RuntimeException.class)
     public Result handleRuntimeException(RuntimeException e) {
         log.error(e.toString(), e);

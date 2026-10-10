@@ -24,22 +24,34 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
     Result seckillVoucher(Long voucherId);
 
     /**
-     * 把未支付订单改成已支付。不碰库存，库存在下单时已经扣过。
+     * 查自己的订单。库里还没有行、但 Redis 里有这次预占时，返回处理中。
      * @param orderId 订单号
-     * @return 成功，或订单不存在、已支付、已取消
+     */
+    Result queryOrder(Long orderId);
+
+    /**
+     * 把未支付且未超过支付期限的订单改成已支付。这是模拟支付，不碰库存。
+     * @param orderId 订单号
+     * @return 成功，或订单不存在、已支付、已取消、已超时
      */
     Result payOrder(Long orderId);
 
     /**
-     * 消费者调用：按订单号幂等写入。库存扣失败时回滚 Redis 资格
+     * 消费者调用：按订单号幂等写入。库存扣失败时回滚这一单的 Redis 预占
      * @param message 队列里的订单号、用户 id、优惠券 id
-     * @return 监听器据此应答，或在抛异常时重新入队
+     * @return 监听器据此应答，或在抛异常时进入有限次重试
      */
     VoucherOrderCreateStatus createVoucherOrder(VoucherOrderMessage message);
 
     /**
-     * 只取消仍未支付的订单，并退回 MySQL 库存和 Redis 资格。已经支付或已经取消则什么都不做。
+     * 只改数据库：未支付改为已取消，并退回 MySQL 库存。不碰 Redis，避免和数据库事务缠在一起。
      * @param orderId 订单号
      */
-    void cancelUnpaidOrder(Long orderId);
+    void markOrderCancelled(Long orderId);
+
+    /**
+     * 数据库已经是已取消时，按订单号回补 Redis。预占如果已经换成新订单，脚本不会动它。
+     * @param orderId 订单号
+     */
+    void restoreRedisIfCancelled(Long orderId);
 }

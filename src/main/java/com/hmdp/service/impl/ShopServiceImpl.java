@@ -11,8 +11,11 @@ import com.hmdp.service.IShopService;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import javax.annotation.Resource;
 import java.util.concurrent.Executors;
@@ -32,10 +35,13 @@ import static com.hmdp.utils.RedisConstants.LOCK_SHOP_KEY;
  * @author 虎哥
  * @since 2021-12-22
  */
+@Slf4j
 @Service
 public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IShopService {
 
-    /** 第一次删除后，再等这么久删第二次，盖住事务提交前被写回的旧缓存 */
+    /** 等锁的上限。超过就返回，不再递归 */
+    private static final long CACHE_LOCK_WAIT_MILLIS = 500L;
+    /** 事务提交后再删第二次，盖住提交前读到旧数据、提交后写回缓存的窗口 */
     private static final long CACHE_DELAY_DELETE_MILLIS = 1000L;
     private static final ScheduledExecutorService CACHE_DELAY_EXECUTOR = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread thread = new Thread(r, "shop-cache-delay-delete");
@@ -51,51 +57,50 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
     @Override
     public Shop queryById(Long id) {
-        // 1. 先查缓存
         String key = CACHE_SHOP_KEY + id;
-        String json = stringRedisTemplate.opsForValue().get(key);
-        // 2. 缓存命中，且存的是有效数据，直接返回
-        if (StrUtil.isNotBlank(json)) {
-            return JSONUtil.toBean(json, Shop.class);
-        }
-        // 3. key 存在但存的是空串，命中空值，直接返回 null
-        if (json != null) {
-            return null;
-        }
-        // 4. 真正的 miss。tryLock 不传租期，Redisson 才启动看门狗；传了固定秒数就不会续期
-        RLock lock = redissonClient.getLock(LOCK_SHOP_KEY + id);
-        boolean isLock = lock.tryLock();
-        // 5. 没抢到锁：别的线程正在重建，休眠后重查缓存
-        if (!isLock) {
-            try {
-                Thread.sleep(50);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            return queryById(id);
-        }
-        // 6. 抢到锁后再读一次缓存。等待期间可能已经有人回填了
-        try {
-            json = stringRedisTemplate.opsForValue().get(key);
+        long deadline = System.currentTimeMillis() + CACHE_LOCK_WAIT_MILLIS;
+        while (true) {
+            String json = stringRedisTemplate.opsForValue().get(key);
             if (StrUtil.isNotBlank(json)) {
                 return JSONUtil.toBean(json, Shop.class);
             }
             if (json != null) {
                 return null;
             }
-            Shop shop = getById(id);
-            if (shop == null) {
-                // 查不到也缓存空值，防穿透
-                stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
-                return null;
+            // tryLock 不传租期，Redisson 才启动看门狗
+            RLock lock = redissonClient.getLock(LOCK_SHOP_KEY + id);
+            if (!lock.tryLock()) {
+                if (System.currentTimeMillis() >= deadline) {
+                    throw new IllegalStateException("店铺正在重建，请稍后重试");
+                }
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("店铺正在重建，请稍后重试");
+                }
+                continue;
             }
-            stringRedisTemplate.opsForValue().set(key, JSONUtil.toJsonStr(shop),
-                    CACHE_SHOP_TTL + RandomUtil.randomInt(0, 5), TimeUnit.MINUTES);
-            return shop;
-        } finally {
-            // 7. 只有自己持有才解锁。Redisson 用 Lua 核对线程标识，不会删掉别人刚加上的锁
-            if (lock.isHeldByCurrentThread()) {
-                lock.unlock();
+            try {
+                json = stringRedisTemplate.opsForValue().get(key);
+                if (StrUtil.isNotBlank(json)) {
+                    return JSONUtil.toBean(json, Shop.class);
+                }
+                if (json != null) {
+                    return null;
+                }
+                Shop shop = getById(id);
+                if (shop == null) {
+                    stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
+                    return null;
+                }
+                stringRedisTemplate.opsForValue().set(key, JSONUtil.toJsonStr(shop),
+                        CACHE_SHOP_TTL + RandomUtil.randomInt(0, 5), TimeUnit.MINUTES);
+                return shop;
+            } finally {
+                if (lock.isHeldByCurrentThread()) {
+                    lock.unlock();
+                }
             }
         }
     }
@@ -107,14 +112,37 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         if (id == null) {
             return Result.fail("店铺id不能为空");
         }
-        // 1. 先改数据库。缓存里可能是上次查询回填的旧 JSON，不能拿请求体直接覆盖
-        updateById(shop);
-        // 2. 马上删一次。删失败会抛异常，事务把刚才的数据库修改回滚
+        // 0 行表示这个 id 不存在，不能告诉调用方修改成功
+        if (!updateById(shop)) {
+            return Result.fail("店铺不存在");
+        }
         String cacheKey = CACHE_SHOP_KEY + id;
-        stringRedisTemplate.delete(cacheKey);
-        // 3. 1 秒后再删一次。这次删除在别的线程里，不挡住接口返回
-        CACHE_DELAY_EXECUTOR.schedule(() -> stringRedisTemplate.delete(cacheKey),
-                CACHE_DELAY_DELETE_MILLIS, TimeUnit.MILLISECONDS);
+        // 提交成功后再删。删失败只打日志，过期时间仍会清掉旧数据
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    deleteCacheTwice(cacheKey);
+                }
+            });
+        } else {
+            deleteCacheTwice(cacheKey);
+        }
         return Result.ok();
+    }
+
+    private void deleteCacheTwice(String cacheKey) {
+        try {
+            stringRedisTemplate.delete(cacheKey);
+        } catch (RuntimeException e) {
+            log.error("删除商户缓存失败, key={}", cacheKey, e);
+        }
+        CACHE_DELAY_EXECUTOR.schedule(() -> {
+            try {
+                stringRedisTemplate.delete(cacheKey);
+            } catch (RuntimeException e) {
+                log.error("延迟删除商户缓存失败, key={}", cacheKey, e);
+            }
+        }, CACHE_DELAY_DELETE_MILLIS, TimeUnit.MILLISECONDS);
     }
 }

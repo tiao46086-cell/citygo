@@ -18,7 +18,10 @@ public class RedisConstants {
 
     public static final String SECKILL_LIMIT_KEY = "seckill:limit:";
     public static final String SECKILL_STOCK_KEY = "seckill:stock:";
+    /** 改成 Hash 之前的已购用户 Set。新的预占写在 SECKILL_HOLD_KEY */
     public static final String SECKILL_ORDER_KEY = "seckill:order:";
+    public static final String SECKILL_HOLD_KEY = "seckill:hold:";
+    public static final String SECKILL_PENDING_KEY = "seckill:pending:";
     public static final String SECKILL_VOUCHER_KEY = "seckill:voucher:";
     public static final String BLOG_LIKED_KEY = "blog:liked:";
     public static final String FEED_KEY = "feed:";
