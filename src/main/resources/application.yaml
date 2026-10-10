@@ -17,8 +17,28 @@ spring:
         max-idle: 10
         min-idle: 1
         time-between-eviction-runs: 10s
+  rabbitmq:
+    host: 127.0.0.1
+    port: 5672
+    # Docker 里的 RabbitMQ 不把宿主机连接当成 guest 的本机连接，所以不用 guest
+    username: citygo
+    password: citygo
+    # correlated：发送时带上 CorrelationData，才能按订单号等待 broker 的确认
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      # mandatory：路由不到队列时把消息退回，而不是悄悄丢掉
+      mandatory: true
+    listener:
+      simple:
+        # manual：业务方法返回后，由监听器自己 basicAck / basicNack
+        acknowledge-mode: manual
   jackson:
     default-property-inclusion: non_null # JSON处理时忽略非空字段
+citygo:
+  seckill:
+    # 未支付超过这段时间就取消。改数值后要删除队列 seckill.order.delay 再启动
+    unpaid-timeout: 15m
 mybatis-plus:
   type-aliases-package: com.hmdp.entity # 别名扫描包
 logging:

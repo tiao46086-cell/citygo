@@ -25,6 +25,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
+        <!-- 只用 Redisson 的锁。不用 starter，避免它替换掉现有的 Lettuce 和 StringRedisTemplate -->
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson</artifactId>
+            <version>3.17.7</version>
+        </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-pool2</artifactId>
@@ -32,6 +38,10 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-amqp</artifactId>
         </dependency>
 
         <dependency>

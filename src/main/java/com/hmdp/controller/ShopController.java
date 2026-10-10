@@ -61,9 +61,8 @@ public class ShopController {
      */
     @PutMapping
     public Result updateShop(@RequestBody Shop shop) {
-        // 写入数据库
-        shopService.updateById(shop);
-        return Result.ok();
+        // 改库并删除缓存，避免 GET /shop/{id} 在 TTL 内一直读到旧数据
+        return shopService.update(shop);
     }
 
     /**
