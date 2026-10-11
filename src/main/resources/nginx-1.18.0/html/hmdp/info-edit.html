@@ -6,7 +6,7 @@
   <title>CityGo</title>
   <link rel="stylesheet" href="./css/element.css">
   <link href="./css/main.css?v=4" rel="stylesheet">
-  <link href="./css/citygo.css?v=4" rel="stylesheet">
+  <link href="./css/citygo.css?v=8" rel="stylesheet">
   <style>
     .cg-info-card {
       background: var(--cg-card);
@@ -54,9 +54,9 @@
 <body>
 <div id="app" class="cg-wide">
   <header class="cg-bar">
-    <button class="cg-btn-ghost" type="button" @click="goBack">返回</button>
+    <button class="cg-back" type="button" aria-label="返回" @click="goBack"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M15 5 L8 12 L15 19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
     <div class="cg-bar-title">资料</div>
-    <button class="cg-btn-ghost" type="button" style="visibility: hidden;">返回</button>
+    <button class="cg-back cg-back-spacer" type="button" tabindex="-1" aria-hidden="true"></button>
   </header>
   <main class="cg-main">
     <p class="cg-info-note">资料暂不能修改</p>
@@ -65,7 +65,7 @@
     <div v-else class="cg-info-card">
       <div class="cg-info-row">
         <div class="cg-info-label">头像</div>
-        <img class="cg-info-avatar" :src="user.icon || '/imgs/icons/default-icon.png?v=4'" @error="onImgError" alt="">
+        <img class="cg-info-avatar" :src="showIcon(user.icon)" @error="onImgError" alt="">
       </div>
       <div class="cg-info-row">
         <div class="cg-info-label">昵称</div>
@@ -93,7 +93,7 @@
 <script src="./js/vue.js"></script>
 <script src="./js/axios.min.js"></script>
 <script src="./js/element.js"></script>
-<script src="./js/common.js?v=4"></script>
+<script src="./js/common.js?v=8"></script>
 <script>
   const app = new Vue({
     el: "#app",
@@ -157,7 +157,7 @@
           return;
         }
         e.target.dataset.fallback = "1";
-        e.target.src = "/imgs/icons/default-icon.png?v=4";
+        e.target.src = "/imgs/icons/default-icon.png?v=8";
       },
       goBack() {
         history.back();

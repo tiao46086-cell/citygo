@@ -1,5 +1,6 @@
 package com.hmdp.service.impl;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.config.RabbitMqConfig;
 import com.hmdp.dto.Result;
@@ -7,10 +8,16 @@ import com.hmdp.dto.VoucherOrderCancelMessage;
 import com.hmdp.dto.VoucherOrderCreateStatus;
 import com.hmdp.dto.VoucherOrderMessage;
 import com.hmdp.dto.VoucherOrderStatus;
+import com.hmdp.dto.VoucherOrderView;
+import com.hmdp.entity.Shop;
+import com.hmdp.entity.Voucher;
 import com.hmdp.entity.VoucherOrder;
 import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.service.ISeckillVoucherService;
+import com.hmdp.service.IShopService;
 import com.hmdp.service.IVoucherOrderService;
+import com.hmdp.service.IVoucherService;
+import com.hmdp.utils.SystemConstants;
 import com.hmdp.utils.RedisIdWorker;
 import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
@@ -31,11 +38,14 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import javax.annotation.Resource;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -96,6 +106,12 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Resource
     private ISeckillVoucherService seckillVoucherService;
+
+    @Resource
+    private IVoucherService voucherService;
+
+    @Resource
+    private IShopService shopService;
 
     @Resource
     private RedisIdWorker redisIdWorker;
@@ -206,6 +222,57 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             return Result.ok(view);
         }
         return Result.fail("订单不存在");
+    }
+
+    @Override
+    public Result pageMine(Integer current) {
+        int pageNo = current == null || current < 1 ? 1 : current;
+        Long userId = UserHolder.getUser().getId();
+        Page<VoucherOrder> page = query()
+                .eq("user_id", userId)
+                .orderByDesc("create_time")
+                .orderByDesc("id")
+                .page(new Page<>(pageNo, SystemConstants.MAX_PAGE_SIZE));
+        List<VoucherOrder> orders = page.getRecords();
+        if (orders.isEmpty()) {
+            return Result.ok(new ArrayList<VoucherOrderView>(), page.getTotal());
+        }
+        Set<Long> expiredIds = expiredUnpaidIds(orders);
+        List<Long> voucherIds = orders.stream()
+                .map(VoucherOrder::getVoucherId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<Long, Voucher> vouchers = voucherIds.isEmpty() ? Collections.emptyMap()
+                : voucherService.listByIds(voucherIds).stream()
+                .collect(Collectors.toMap(Voucher::getId, voucher -> voucher));
+        List<Long> shopIds = vouchers.values().stream()
+                .map(Voucher::getShopId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<Long, Shop> shops = shopIds.isEmpty() ? Collections.emptyMap()
+                : shopService.listByIds(shopIds).stream()
+                .collect(Collectors.toMap(Shop::getId, shop -> shop));
+        List<VoucherOrderView> views = new ArrayList<>();
+        for (VoucherOrder order : orders) {
+            VoucherOrderView view = new VoucherOrderView();
+            view.setOrderId(order.getId());
+            view.setStatus(order.getStatus());
+            view.setState(orderState(order, expiredIds));
+            view.setCreateTime(order.getCreateTime());
+            Voucher voucher = vouchers.get(order.getVoucherId());
+            if (voucher != null) {
+                view.setTitle(voucher.getTitle());
+                view.setPayValue(voucher.getPayValue());
+                Shop shop = shops.get(voucher.getShopId());
+                if (shop != null) {
+                    view.setShopName(shop.getName());
+                }
+            }
+            views.add(view);
+        }
+        return Result.ok(views, page.getTotal());
     }
 
     @Override
@@ -481,7 +548,30 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         return rows != null && rows > 0;
     }
 
+    private Set<Long> expiredUnpaidIds(List<VoucherOrder> orders) {
+        List<Long> unpaidIds = orders.stream()
+                .filter(order -> order.getStatus() != null && order.getStatus() == ORDER_STATUS_UNPAID)
+                .map(VoucherOrder::getId)
+                .collect(Collectors.toList());
+        if (unpaidIds.isEmpty()) {
+            return Collections.emptySet();
+        }
+        return query()
+                .select("id")
+                .in("id", unpaidIds)
+                .eq("status", ORDER_STATUS_UNPAID)
+                .apply("create_time <= DATE_SUB(NOW(), INTERVAL {0} SECOND)", unpaidTimeout.getSeconds())
+                .list()
+                .stream()
+                .map(VoucherOrder::getId)
+                .collect(Collectors.toSet());
+    }
+
     private String orderState(VoucherOrder order) {
+        return orderState(order, null);
+    }
+
+    private String orderState(VoucherOrder order, Set<Long> expiredIds) {
         Integer status = order.getStatus();
         if (status != null && status == ORDER_STATUS_PAID) {
             return "已支付";
@@ -489,7 +579,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if (status != null && status == ORDER_STATUS_CANCELLED) {
             return "已取消";
         }
-        if (status != null && status == ORDER_STATUS_UNPAID && unpaidExpired(order.getId())) {
+        boolean expired = expiredIds == null ? unpaidExpired(order.getId()) : expiredIds.contains(order.getId());
+        if (status != null && status == ORDER_STATUS_UNPAID && expired) {
             return "已超时";
         }
         if (status != null && status == ORDER_STATUS_UNPAID) {

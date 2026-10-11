@@ -24,6 +24,7 @@ public class MvcConfig implements WebMvcConfigurer {
                 .excludePathPatterns(
                         "/user/code",
                         "/user/login",
+                        "/user/demo",
                         "/blog/hot",
                         // /blog/* 只放行笔记详情。点赞 /blog/like/*、我的笔记 /blog/of/me、
                         // 修改和删除 /blog/me/* 仍要登录。

@@ -6,7 +6,7 @@
   <title>CityGo</title>
   <link rel="stylesheet" href="./css/element.css">
   <link href="./css/main.css?v=7" rel="stylesheet">
-  <link href="./css/citygo.css?v=7" rel="stylesheet">
+  <link href="./css/citygo.css?v=8" rel="stylesheet">
   <style>
     .cg-profile {
       display: flex;
@@ -67,13 +67,13 @@
 <body>
 <div id="app" class="cg-wide">
   <header class="cg-bar">
-    <button class="cg-btn-ghost" @click="goBack">返回</button>
+    <button class="cg-back" type="button" aria-label="返回" @click="goBack"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M15 5 L8 12 L15 19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
     <div class="cg-bar-title">我的</div>
-    <button class="cg-btn-ghost" style="visibility: hidden;">返回</button>
+    <button class="cg-back cg-back-spacer" type="button" tabindex="-1" aria-hidden="true"></button>
   </header>
   <main class="cg-main">
     <div class="cg-profile">
-      <img class="cg-avatar-lg" :src="user.icon || '/imgs/icons/default-icon.png?v=4'" alt="" @error="onImgError">
+      <img class="cg-avatar-lg" :src="showIcon(user.icon)" alt="" @error="onImgError">
       <div>
         <div class="cg-shop-name">{{user.nickName || "未登录"}}</div>
         <div class="cg-meta">广州</div>
@@ -81,7 +81,7 @@
       </div>
     </div>
     <div class="cg-profile-actions">
-      <button class="cg-btn" @click="toOrders">订单查询</button>
+      <button class="cg-btn" @click="toOrders">我的订单</button>
       <button class="cg-btn cg-btn-line" @click="toEdit">查看资料</button>
       <button class="cg-btn-ghost" @click="logout">退出登录</button>
     </div>
@@ -127,7 +127,7 @@
 <script src="./js/vue.js"></script>
 <script src="./js/axios.min.js"></script>
 <script src="./js/element.js"></script>
-<script src="./js/common.js?v=4"></script>
+<script src="./js/common.js?v=8"></script>
 <script src="./js/footer.js?v=7"></script>
 <script>
   const app = new Vue({

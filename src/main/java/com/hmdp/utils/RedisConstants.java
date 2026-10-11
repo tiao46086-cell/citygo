@@ -5,6 +5,10 @@ public class RedisConstants {
     public static final Long LOGIN_CODE_TTL = 2L;
     public static final String LOGIN_USER_KEY = "login:token:";
     public static final Long LOGIN_USER_TTL = 36000L;
+    /** 体验用户序号。手机号按这个序号生成，不能走验证码登录 */
+    public static final String DEMO_USER_SEQ_KEY = "demo:user:seq";
+    /** 按 IP 限制体验登录次数 */
+    public static final String DEMO_LOGIN_LIMIT_KEY = "demo:login:ip:";
 
     public static final Long CACHE_NULL_TTL = 2L;
 

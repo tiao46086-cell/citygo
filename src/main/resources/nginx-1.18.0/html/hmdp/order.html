@@ -6,74 +6,72 @@
   <title>CityGo</title>
   <link rel="stylesheet" href="./css/element.css">
   <link href="./css/main.css?v=4" rel="stylesheet">
-  <link href="./css/citygo.css?v=4" rel="stylesheet">
+  <link href="./css/citygo.css?v=8" rel="stylesheet">
   <style>
-    .cg-order-wrap {
-      display: flex;
-      justify-content: center;
-      padding-top: 24px;
-    }
     .cg-order-card {
-      box-sizing: border-box;
-      width: 100%;
-      max-width: 400px;
-      background: var(--cg-card);
-      border-radius: var(--cg-radius);
-      box-shadow: var(--cg-shadow);
-      padding: 20px 16px 16px;
+      padding: 14px 16px;
     }
-    .cg-order-lead {
-      margin: 0 0 16px;
-      color: var(--cg-muted);
+    .cg-order-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+    }
+    .cg-order-state {
+      flex-shrink: 0;
+      color: var(--cg-primary);
       font-size: 13px;
-      line-height: 1.6;
     }
-    .cg-order-submit {
-      width: 100%;
-      margin-top: 12px;
-      padding: 12px 14px;
-    }
-    .cg-order-result {
-      margin-top: 16px;
-      padding-top: 14px;
-      border-top: 1px solid var(--cg-line);
-      font-size: 14px;
-      line-height: 1.8;
-      word-break: break-all;
-    }
-    .cg-order-note {
-      margin: 8px 0 0;
+    .cg-order-meta {
+      margin-top: 6px;
       color: var(--cg-muted);
       font-size: 12px;
-      line-height: 1.5;
+      line-height: 1.6;
+      word-break: break-all;
     }
-    #app .el-input__inner:focus {
-      border-color: var(--cg-primary);
+    .cg-order-pay {
+      margin-top: 10px;
+    }
+    .cg-more {
+      display: block;
+      width: 100%;
+      margin-top: 12px;
+      padding: 10px;
+      border: 0;
+      background: transparent;
+      color: var(--cg-primary);
+      cursor: pointer;
     }
   </style>
 </head>
 <body>
 <div id="app" class="cg-wide">
   <header class="cg-bar">
-    <button class="cg-btn-ghost" @click="goBack">返回</button>
-    <div class="cg-bar-title">订单查询</div>
-    <button class="cg-btn-ghost" style="visibility: hidden;">返回</button>
+    <button class="cg-back" type="button" aria-label="返回" @click="goBack"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M15 5 L8 12 L15 19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+    <div class="cg-bar-title">我的订单</div>
+    <button class="cg-back cg-back-spacer" type="button" tabindex="-1" aria-hidden="true"></button>
   </header>
   <main class="cg-main">
-    <div class="cg-order-wrap">
-      <div class="cg-order-card">
-        <p class="cg-order-lead">输入订单号查看状态。支付只修改订单状态，不接入支付宝或微信。</p>
-        <el-input v-model="orderId" placeholder="输入订单号" @keyup.enter.native="query"></el-input>
-        <button class="cg-btn cg-order-submit" type="button" @click="query" :disabled="loading">{{ loading ? "查询中" : "查询" }}</button>
-        <div v-if="loading" class="hint">查询中</div>
-        <div v-else-if="error" class="hint">{{error}}</div>
-        <div v-else-if="order" class="cg-order-result">
-          <div>订单号：{{order.orderId}}</div>
-          <div>状态：{{order.state}}</div>
-          <button v-if="order.state === '未支付'" class="cg-btn cg-order-submit" type="button" @click="pay" :disabled="paying">{{ paying ? "支付中" : "模拟支付" }}</button>
+    <div v-if="state === 'loading'" class="hint">订单加载中</div>
+    <div v-else-if="state === 'error'" class="hint">{{error}}</div>
+    <div v-else-if="orders.length === 0" class="hint">还没有订单</div>
+    <div v-else class="cg-shops">
+      <article class="cg-card cg-order-card" v-for="order in orders" :key="order.orderId">
+        <div class="cg-order-row">
+          <div class="cg-shop-name">{{order.title || "优惠券"}}</div>
+          <div class="cg-order-state">{{order.state}}</div>
         </div>
-      </div>
+        <div class="cg-order-meta">
+          <div v-if="order.shopName">{{order.shopName}}</div>
+          <div v-if="order.payValue">¥ {{util.formatPrice(order.payValue)}}</div>
+          <div>订单号：{{order.orderId}}</div>
+          <div v-if="order.createTime">{{formatTime(order.createTime)}}</div>
+        </div>
+        <button v-if="order.state === '未支付'" class="cg-btn cg-order-pay" type="button" @click="pay(order)" :disabled="payingId === order.orderId">{{ payingId === order.orderId ? "支付中" : "模拟支付" }}</button>
+      </article>
     </div>
+    <button v-if="orders.length < total" class="cg-more" type="button" @click="query(page + 1)">查看更多</button>
+    <p class="cg-note">支付只修改订单状态，不接入支付宝或微信。</p>
   </main>
 </div>
 <script src="./js/vue.js"></script>
@@ -84,57 +82,60 @@
   const app = new Vue({
     el: "#app",
     data: {
-      orderId: "",
-      order: null,
+      util,
+      orders: [],
+      total: 0,
+      page: 1,
+      state: "loading",
       error: "",
-      loading: false,
-      paying: false
+      payingId: ""
     },
     created() {
       if (!sessionStorage.getItem("token")) {
         location.href = "/login.html";
+        return;
       }
+      this.query(1);
     },
     methods: {
       goBack() {
         history.back();
       },
-      query() {
-        if (this.loading) {
-          return;
-        }
-        let id = (this.orderId || "").trim();
-        if (!/^\d+$/.test(id)) {
-          this.$message.error("请输入订单号");
-          return;
-        }
-        this.loading = true;
-        this.order = null;
-        this.error = "";
-        axios.get("/voucher-order/" + id)
-          .then(({data}) => {
-            this.order = data;
+      formatTime(value) {
+        return String(value).replace("T", " ").slice(0, 16);
+      },
+      query(page) {
+        axios.get("/voucher-order/me?current=" + (page || 1))
+          .then(resp => {
+            let rows = resp.data || [];
+            this.total = resp.total || 0;
+            this.state = "ok";
+            if (!page || page === 1) {
+              this.orders = rows;
+              this.page = 1;
+            } else {
+              this.orders = this.orders.concat(rows);
+              this.page = page;
+            }
           })
           .catch(err => {
-            this.error = typeof err === "string" ? err : "查询失败";
-          })
-          .then(() => {
-            this.loading = false;
+            this.state = "error";
+            this.error = typeof err === "string" ? err : "订单加载失败";
           });
       },
-      pay() {
-        if (this.paying || !this.order || !this.order.orderId) {
+      pay(order) {
+        if (this.payingId || !order || !order.orderId) {
           return;
         }
-        this.paying = true;
-        axios.post("/voucher-order/pay/" + this.order.orderId)
+        this.payingId = order.orderId;
+        axios.post("/voucher-order/pay/" + order.orderId)
           .then(() => {
+            order.state = "已支付";
             this.$message.success("支付成功");
-            this.order.state = "已支付";
           })
           .catch(err => this.$message.error(err))
           .then(() => {
-            this.paying = false;
+            this.payingId = "";
           });
       }
     }

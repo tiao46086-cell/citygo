@@ -124,6 +124,29 @@ body {
     color: var(--cg-primary);
 }
 
+.cg-back {
+    width: 72px;
+    height: 40px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--cg-text);
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+.cg-back:hover {
+    color: var(--cg-primary);
+}
+
+.cg-back-spacer {
+    visibility: hidden;
+    pointer-events: none;
+}
+
 .cg-section-title {
     margin: 18px 0 10px;
     font-size: 16px;

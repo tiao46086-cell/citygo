@@ -55,7 +55,7 @@
         <div class="cg-blog-body">
           <div class="cg-blog-title">{{b.title}}</div>
           <div class="cg-blog-foot">
-            <img class="cg-avatar" :src="b.icon || '/imgs/icons/default-icon.png?v=4'" alt="" @error="onImgError">
+            <img class="cg-avatar" :src="showIcon(b.icon)" alt="" @error="onImgError">
             <div class="cg-author">{{b.name}}</div>
             <button class="cg-like" :class="{on: b.isLike}" @click.stop="addLike(b)">赞 {{b.liked}}</button>
           </div>
@@ -69,7 +69,7 @@
 <script src="./js/vue.js"></script>
 <script src="./js/axios.min.js"></script>
 <script src="./js/element.js"></script>
-<script src="./js/common.js?v=3"></script>
+<script src="./js/common.js?v=8"></script>
 <script src="./js/footer.js?v=7"></script>
 <script>
   const app = new Vue({

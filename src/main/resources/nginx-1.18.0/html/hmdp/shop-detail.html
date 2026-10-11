@@ -6,15 +6,15 @@
   <title>CityGo</title>
   <link rel="stylesheet" href="./css/element.css">
   <link href="./css/main.css?v=3" rel="stylesheet">
-  <link href="./css/citygo.css?v=3" rel="stylesheet">
+  <link href="./css/citygo.css?v=8" rel="stylesheet">
   <link href="./css/shop-detail.css?v=3" rel="stylesheet">
 </head>
 <body>
 <div id="app" class="cg-wide">
   <header class="cg-bar">
-    <button class="cg-btn-ghost" @click="goBack">返回</button>
+    <button class="cg-back" type="button" aria-label="返回" @click="goBack"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M15 5 L8 12 L15 19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
     <div class="cg-bar-title">{{shop.name || "商户"}}</div>
-    <button class="cg-btn-ghost" style="visibility: hidden;">返回</button>
+    <button class="cg-back cg-back-spacer" type="button" tabindex="-1" aria-hidden="true"></button>
   </header>
   <main class="cg-main">
     <div v-if="shopState === 'loading'" class="hint">店铺加载中</div>

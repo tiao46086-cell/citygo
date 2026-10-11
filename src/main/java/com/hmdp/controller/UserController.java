@@ -51,6 +51,14 @@ public class UserController {
     }
 
     /**
+     * 体验登录。不需要手机号，也不发短信。
+     */
+    @PostMapping("/demo")
+    public Result demo(HttpServletRequest request) {
+        return userService.loginDemo(clientIp(request));
+    }
+
+    /**
      * 删掉当前请求这个 token。个人页退出登录会再清掉浏览器里的 token。
      */
     @PostMapping("/logout")
@@ -75,5 +83,17 @@ public class UserController {
         info.setUpdateTime(null);
         // 返回
         return Result.ok(info);
+    }
+
+    /**
+     * 取 Nginx 追加在最后的地址。前面的段可能是调用方自己带的。
+     */
+    private String clientIp(HttpServletRequest request) {
+        String forwarded = request.getHeader("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isEmpty()) {
+            String[] parts = forwarded.split(",");
+            return parts[parts.length - 1].trim();
+        }
+        return request.getRemoteAddr();
     }
 }

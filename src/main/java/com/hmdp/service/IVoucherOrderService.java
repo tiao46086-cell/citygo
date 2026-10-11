@@ -32,6 +32,12 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
     Result queryOrder(Long orderId);
 
     /**
+     * 当前用户的订单，按创建时间从新到旧分页。只包含已经写入数据库的订单。
+     * @param current 页码，从 1 开始
+     */
+    Result pageMine(Integer current);
+
+    /**
      * 把未支付且未超过支付期限的订单改成已支付。这是模拟支付，不碰库存。
      * @param orderId 订单号
      * @return 成功，或订单不存在、已支付、已取消、已超时

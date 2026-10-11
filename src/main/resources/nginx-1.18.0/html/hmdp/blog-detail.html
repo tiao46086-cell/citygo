@@ -6,13 +6,13 @@
   <title>CityGo</title>
   <link rel="stylesheet" href="./css/element.css">
   <link href="./css/main.css?v=4" rel="stylesheet">
-  <link href="./css/citygo.css?v=4" rel="stylesheet">
+  <link href="./css/citygo.css?v=8" rel="stylesheet">
   <link href="./css/blog-detail.css?v=7" rel="stylesheet">
 </head>
 <body>
 <div id="app" class="cg-wide">
   <header class="cg-bar">
-    <button class="cg-btn-ghost" @click="goBack">返回</button>
+    <button class="cg-back" type="button" aria-label="返回" @click="goBack"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M15 5 L8 12 L15 19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
     <div class="cg-bar-title">{{blog.title || "笔记"}}</div>
     <div class="cg-more-wrap" v-if="isMine">
       <button class="cg-more-btn" type="button" aria-label="更多" :aria-expanded="menuOpen ? 'true' : 'false'" @click.stop="menuOpen = !menuOpen">
@@ -24,7 +24,7 @@
         <button type="button" :disabled="deleting" @click="removeBlog">删除</button>
       </div>
     </div>
-    <button v-else class="cg-btn-ghost cg-bar-spacer" type="button" tabindex="-1">返回</button>
+    <button v-else class="cg-back cg-back-spacer" type="button" tabindex="-1" aria-hidden="true"></button>
   </header>
   <main class="cg-main">
     <div v-if="blogState === 'loading'" class="hint">笔记加载中</div>
@@ -39,7 +39,7 @@
         </button>
       </div>
       <div class="cg-author">
-        <img :src="blog.icon || '/imgs/icons/default-icon.png?v=4'" alt="" @error="onImgError">
+        <img :src="showIcon(blog.icon)" alt="" @error="onImgError">
         <div>
           <strong>{{blog.name || "用户"}}</strong>
           <div class="cg-meta">{{formatTime(blog.createTime)}}</div>
@@ -62,7 +62,7 @@
         </button>
       </div>
       <div class="cg-likers" v-if="likes.length">
-        <img v-for="u in likes" :key="u.id" :src="u.icon || '/imgs/icons/default-icon.png?v=4'" alt="" @error="onImgError">
+        <img v-for="u in likes" :key="u.id" :src="showIcon(u.icon)" alt="" @error="onImgError">
         <span>{{blog.liked}} 人点赞</span>
       </div>
 
@@ -76,7 +76,7 @@
       <div v-else-if="comments.length === 0" class="hint">还没有评论</div>
       <div v-else>
         <div class="cg-comment" v-for="c in comments" :key="c.id">
-          <img :src="c.icon || '/imgs/icons/default-icon.png?v=4'" alt="" @error="onImgError">
+          <img :src="showIcon(c.icon)" alt="" @error="onImgError">
           <div>
             <strong>{{c.name || "用户"}}</strong>
             <button v-if="user && c.userId === user.id" class="cg-more" @click="removeComment(c)">删除</button>
@@ -92,7 +92,7 @@
 <script src="./js/vue.js"></script>
 <script src="./js/axios.min.js"></script>
 <script src="./js/element.js"></script>
-<script src="./js/common.js?v=4"></script>
+<script src="./js/common.js?v=8"></script>
 <script>
   const app = new Vue({
     el: "#app",

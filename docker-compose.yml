@@ -9,7 +9,9 @@ services:
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     volumes:
       - citygo-mysql:/var/lib/mysql
-      - ./hmdp.sql:/docker-entrypoint-initdb.d/hmdp.sql:ro
+      # 只在数据目录为空时按文件名顺序执行。已有的 citygo-mysql 卷不会重跑这两份脚本。
+      - ./hmdp.sql:/docker-entrypoint-initdb.d/01-hmdp.sql:ro
+      - ./sql/citygo-demo.sql:/docker-entrypoint-initdb.d/02-citygo-demo.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 5s
@@ -18,6 +20,9 @@ services:
 
   redis:
     image: redis:7.2
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - citygo-redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -26,9 +31,13 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.13-management
+    hostname: citygo-rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: ${CITYGO_RABBITMQ_USERNAME:-citygo}
       RABBITMQ_DEFAULT_PASS: ${CITYGO_RABBITMQ_PASSWORD:-citygo}
+      RABBITMQ_NODENAME: rabbit@citygo-rabbitmq
+    volumes:
+      - citygo-rabbitmq:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -73,3 +82,5 @@ services:
 
 volumes:
   citygo-mysql:
+  citygo-redis:
+  citygo-rabbitmq:

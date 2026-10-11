@@ -35,7 +35,7 @@
   </div>
   <div class="basic">
     <div class="basic-icon">
-      <img :src="user.icon || '/imgs/icons/default-icon.png?v=4'" alt="">
+      <img :src="showIcon(user.icon)" alt="">
     </div>
     <div class="basic-info">
       <div class="name">{{user.nickName}}</div>
@@ -65,7 +65,7 @@
         <div>你们都关注了：</div>
         <div class="follow-info" v-for="u in commonFollows" :key="u.id">
           <div class="follow-info-icon" @click="toOtherInfo(u.id)">
-            <img :src="u.icon || '/imgs/icons/default-icon.png?v=4'" alt="">
+            <img :src="showIcon(u.icon)" alt="">
           </div>
           <div class="follow-info-name">
             <div class="name">{{u.nickName}}</div>
@@ -83,7 +83,7 @@
 <script src="./js/axios.min.js"></script>
 <!-- 引入组件库 -->
 <script src="./js/element.js"></script>
-<script src="./js/common.js?v=2"></script>
+<script src="./js/common.js?v=8"></script>
 <script src="./js/footer.js?v=2"></script>
 <script>
   const app = new Vue({

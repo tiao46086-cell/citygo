@@ -103,3 +103,15 @@ const util = {
     }
   }
 }
+if (window.Vue) {
+  Vue.mixin({
+    methods: {
+      showIcon(icon) {
+        if (!icon || String(icon).indexOf("default-icon.png") !== -1) {
+          return "/imgs/icons/default-icon.png?v=8";
+        }
+        return icon;
+      }
+    }
+  });
+}

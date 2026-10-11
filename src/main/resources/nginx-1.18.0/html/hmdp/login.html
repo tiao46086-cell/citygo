@@ -6,7 +6,7 @@
   <title>CityGo</title>
   <link rel="stylesheet" href="./css/element.css">
   <link href="./css/main.css?v=4" rel="stylesheet">
-  <link href="./css/citygo.css?v=4" rel="stylesheet">
+  <link href="./css/citygo.css?v=8" rel="stylesheet">
   <style>
     .cg-login-wrap {
       display: flex;
@@ -79,20 +79,21 @@
 <body>
 <div id="app" class="cg-wide">
   <header class="cg-bar">
-    <button class="cg-btn-ghost" @click="goBack">返回</button>
+    <button class="cg-back" type="button" aria-label="返回" @click="goBack"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M15 5 L8 12 L15 19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
     <div class="cg-bar-title">登录</div>
-    <button class="cg-btn-ghost" style="visibility: hidden;">返回</button>
+    <button class="cg-back cg-back-spacer" type="button" tabindex="-1" aria-hidden="true"></button>
   </header>
   <main class="cg-main">
     <div class="cg-login-wrap">
       <div class="cg-login-card">
-        <p class="cg-login-lead">用手机号登录。未注册的号码验证后会自动创建账户。</p>
+        <p class="cg-login-lead">用手机号登录。未注册的号码验证后会自动创建账户。也可以不填手机号，直接进入体验账号。体验账号不能用验证码登录。</p>
         <el-input placeholder="请输入手机号" v-model="form.phone"></el-input>
         <div class="cg-code-row">
           <el-input placeholder="请输入验证码" v-model="form.code"></el-input>
           <button class="cg-btn cg-btn-line" type="button" @click="sendCode" :disabled="disabled">{{codeBtnMsg}}</button>
         </div>
-        <button class="cg-btn cg-login-submit" type="button" @click="login" :disabled="logging">{{ logging ? "登录中" : "登录" }}</button>
+        <button class="cg-btn cg-login-submit" type="button" @click="login" :disabled="logging || demoing">{{ logging ? "登录中" : "登录" }}</button>
+        <button class="cg-btn cg-btn-line cg-login-submit" type="button" @click="demoLogin" :disabled="logging || demoing">{{ demoing ? "进入中" : "体验 CityGo" }}</button>
         <label class="cg-agree">
           <input type="checkbox" v-model="agreed">
           <span>我已阅读并同意《CityGo用户服务协议》《隐私政策》。协议链接不跳转，本页只做登录演示。</span>
@@ -112,6 +113,7 @@
       agreed: false,
       disabled: false,
       logging: false,
+      demoing: false,
       codeBtnMsg: "发送验证码",
       form: {}
     },
@@ -138,6 +140,27 @@
           })
           .catch(err => {
             this.logging = false;
+            this.$message.error(err);
+          });
+      },
+      demoLogin() {
+        if (this.demoing || this.logging) {
+          return;
+        }
+        if (!this.agreed) {
+          this.$message.error("请先确认阅读用户协议！");
+          return;
+        }
+        this.demoing = true;
+        axios.post("/user/demo")
+          .then(({data}) => {
+            if (data) {
+              sessionStorage.setItem("token", data);
+            }
+            location.href = "/index.html";
+          })
+          .catch(err => {
+            this.demoing = false;
             this.$message.error(err);
           });
       },
