@@ -147,44 +147,29 @@ CityGo 最终主要包含三个业务方向。
 
 # 6. 计划技术栈
 
-基础：
+已经在项目里使用：
 
 - Java
 - Spring Boot
-- MyBatis-Plus
+- Spring MVC（登录用的两个拦截器）
+- MyBatis-Plus（单表用它生成 SQL；联表仍写 MyBatis 的 XML，例如 `VoucherMapper.queryVoucherOfShop`）
 - MySQL
-
-缓存与高并发：
-
 - Redis
 - Lua
-- Redisson
-- Caffeine
-
-消息队列：
-
 - RabbitMQ
+- Redisson 3.17.7。只用于商户缓存重建：`tryLock()` 不设租期，看门狗续期；解锁用 Lua 核对持有者。秒杀不加这把锁。依赖用的是 `redisson`，不是 starter，避免换掉 Lettuce
+- Docker（只把 RabbitMQ 跑在容器 `citygo-rabbitmq` 里，映射 5672 和 15672。应用本身没有 Dockerfile）
 
-搜索：
+评估之后明确先不引入。开发者没有再次要求时，不要写这些代码，也不要写进简历：
 
+- Caffeine。没有测到 Redis 变慢，本地缓存还要单独处理多台机器之间的失效。
 - Elasticsearch
+- JMeter，以及任何没有测过的 QPS、P95、P99
+- Nginx。仓库里有课程自带的静态页面，没有为 CityGo 做反向代理。
+- 真实的支付宝或微信支付
+- 本地消息表
 
-部署：
-
-- Docker
-- Nginx
-
-测试与性能：
-
-- JMeter
-- 根据实际需要学习 Arthas 等工具
-
-
-注意：
-
-技术栈不是必须全部使用。
-
-只有当项目确实出现相应问题时，才能引入对应技术。
+技术栈不是必须全部使用。只有当前实现确实挡住业务时，才引入下一种技术。
 
 
 ---
@@ -228,7 +213,9 @@ CityGo 最终主要包含三个业务方向。
 
 ## A. 评论系统
 
-完善探店内容评论：
+状态：跳过。控制器还是空的。
+
+原先要做的探店评论：
 
 - 一级评论
 - 回复
@@ -239,7 +226,9 @@ CityGo 最终主要包含三个业务方向。
 
 ## B. 收藏系统
 
-新增：
+状态：跳过。
+
+原先要新增：
 
 - 收藏探店内容
 - 收藏商户
@@ -248,7 +237,9 @@ CityGo 最终主要包含三个业务方向。
 
 ## C. 商户评分
 
-新增：
+状态：跳过。
+
+原先要新增：
 
 - 用户评分
 - 商户平均评分
@@ -257,7 +248,9 @@ CityGo 最终主要包含三个业务方向。
 
 ## D. 秒杀系统工程化改造
 
-重点研究：
+状态：已完成。细节在第 12 节。不要再改回课程里的 Redis Stream，也不要改回 `synchronized`。
+
+原计划：
 
 Redis + Lua
 ↓
@@ -269,17 +262,20 @@ RabbitMQ
 ↓
 MySQL
 
-重点解决：
+这条链路里已经挡住的问题：
 
 - 超卖
 - 一人一单
-- 消息丢失
 - 消息重复
-- 消费失败
-- 消费幂等
+- 消费失败之后的重试和 Redis 回滚
+- 同一个订单号的重复消费
+
+发布确认超过 3 秒没有回来时，消息有没有进队列是不确定的，Redis 资格也不退。所以不能说消息零丢失。
 
 
 ## E. 订单生命周期
+
+状态：已完成。未支付 15 分钟后取消并归还库存；支付只把状态从 1 改成 2。细节在第 12 节。
 
 订单不只停留在“创建成功”。
 
@@ -304,7 +300,9 @@ MySQL
 
 ## F. Elasticsearch 搜索
 
-实现：
+状态：不做。开发者没有再次要求时不要开始。
+
+原先考虑过：
 
 - 商户全文搜索
 - 探店内容搜索
@@ -319,7 +317,9 @@ MySQL
 
 ## G. 多级缓存
 
-研究：
+状态：不做。商户缓存保持 Redis，更新路径用延迟双删。不要加 Caffeine。
+
+原先考虑过：
 
 Caffeine
 +
@@ -339,7 +339,9 @@ MySQL
 
 ## H. Feed / 热门排行升级
 
-研究：
+状态：不做。评论、收藏、评分也跳过了，没有新的热度数据来源。
+
+原先考虑过：
 
 点赞
 收藏
@@ -355,44 +357,21 @@ MySQL
 
 # 9. 工程化增强
 
-核心功能完成后再考虑：
+和简历主线一起已经做了的：
 
-- 接口限流
-- MQ 可靠性
-- 消费幂等
-- 缓存一致性
-- 日志
-- 异常处理
-- Docker 部署
-- 性能测试
+- 秒杀接口限流：同一用户 1 秒最多 5 次，脚本是 `seckill_limit.lua`
+- MQ 可靠性：发布确认、mandatory 退回、消费者手动应答
+- 消费幂等：同一个订单号重复投递不再扣库存
+- 缓存一致性：商户更新先写库再删缓存，1 秒后再删一次
+- Docker：只有 RabbitMQ 容器
 
-后期使用 JMeter 对关键接口进行压测。
+还没做，也不要主动做：
 
-关注：
+- 全站日志规范
+- 应用本身的 Docker 镜像
+- JMeter 性能测试
 
-- QPS
-- 平均响应时间
-- P95
-- P99
-- 错误率
-
-优化必须尽量有数据支撑。
-
-例如：
-
-优化前
-↓
-压测
-↓
-发现瓶颈
-↓
-分析原因
-↓
-修改
-↓
-再次压测
-↓
-比较结果
+如果以后开发者明确要求压测，再测 QPS、平均响应时间、P95、P99 和错误率，并且用优化前后的数字比较。现在没有这些数字，文档和简历里都不要写。
 
 
 ---
@@ -418,93 +397,105 @@ MySQL
 
 # 11. 开发阶段
 
-Phase 0
-获取并运行原版黑马点评
+Phase 0　已完成。获取并运行原版黑马点评。
 
-Phase 1
-理解原项目结构和核心调用链
+Phase 1　已完成。理解原项目结构和核心调用链。
 
-Phase 2
-CityGo 项目基础重构
+Phase 2　已完成。登录、商户缓存读路径、两处小修复、应用改名为 CityGo。
 
-Phase 3
-评论 / 收藏 / 商户评分
+Phase 3　明确跳过。评论、收藏、商户评分。`BlogCommentsController` 仍是空的。
 
-Phase 4
-Redis 缓存体系整理
+Phase 4　已完成。商户更新先写数据库再删缓存，并做 1 秒延迟双删。读路径在 Phase 2 就已经做了。
 
-Phase 5
-秒杀核心流程
+Phase 5　已完成。Redis + Lua 判断活动时间、库存、一人一单，再用 Redis 生成订单号。
 
-Phase 6
-RabbitMQ 异步订单
+Phase 6　已完成。资格通过后用 RabbitMQ 异步创建订单。
 
-Phase 7
-MQ 可靠性 + 消费幂等
+Phase 7　已完成。发布确认、手动应答、按订单号幂等、数据库扣库存失败时回滚 Redis。
 
-Phase 8
-订单超时取消 / 库存补偿
+Phase 8　已完成。未支付订单 15 分钟后经死信队列取消，并归还 MySQL 和 Redis 库存。支付接口只改订单状态。
 
-Phase 9
-Elasticsearch 搜索
+Phase 9　不做。Elasticsearch。
 
-Phase 10
-Caffeine + Redis 多级缓存
+Phase 10　不做。Caffeine + Redis 多级缓存。
 
-Phase 11
-Feed / 热门排行优化
+Phase 11　不做。Feed / 热门排行。
 
-Phase 12
-Docker 部署
+Phase 12　只做了一部分。RabbitMQ 在 Docker 里，应用没有容器化。
 
-Phase 13
-JMeter 压测与性能优化
+Phase 13　不做。JMeter 压测。没有测过的数字不能写。
 
+另外已经写进代码、单独算一条：秒杀按用户限流，1 秒 5 次。
 
-不要跨阶段一次实现大量功能。
+不要再实现 Phase 3、9、10、11、13，除非开发者明确说要做。一次仍然只改开发者确认过的一小块。
 
 
 ---
 
 # 12. 当前阶段
 
-当前阶段：
+当前阶段：简历要写的主线已经做完。下一步是投简历，不是继续加中间件。
 
-Phase 2 —— CityGo 项目基础重构。
+应用名 `citygo`，启动类 `CityGoApplication`，端口 8081。包名仍是 `com.hmdp`，数据库名仍是 `hmdp`。连接信息在 `application.yaml`。Redis 在本机 6379。RabbitMQ 用 Docker 容器 `citygo-rabbitmq`，管理页是 `http://127.0.0.1:15672`。
 
-Phase 0（项目跑起来）和 Phase 1（理解原项目调用链）已完成。
+## 已经完成
 
-登录不在原计划中单列，但评论、收藏、评分、一人一单、点赞改造都需要知道当前用户，因此作为 Phase 2 的第一项。
-登录是黑马点评课程已有功能，不算 CityGo 的创新。
+Phase 2 的登录和商户缓存读路径：
 
-Phase 2 内容：
+- [x] 验证码 `POST /user/code`，登录 `POST /user/login`，当前用户 `GET /user/me`
+- [x] 验证码按手机号存在 Redis，登录成功后删除，只能用一次。发给 A 的验证码不能登录 B
+- [x] token 存在 Redis Hash。`RefreshTokenInterceptor`（order 0，所有请求）先把用户放进 `UserHolder` 这个 ThreadLocal，`LoginInterceptor`（order 1）发现没有用户就返回 401
+- [x] 白名单只放行只读接口：`/user/code`、`/user/login`、`/blog/hot`、`/shop-type/**`、`/shop/*`、`/shop/of/*`、`/voucher/list/*`。改商户、下单要登录。还没有区分商家和普通用户
+- [x] 商户详情 Cache Aside：`cache:shop:{id}`，TTL 30 分钟再加 0 到 5 分钟随机抖动
+- [x] 穿透：查不到时写空串，TTL 2 分钟
+- [x] 击穿：Redisson 锁 `lock:shop:{id}`。`tryLock()` 不设租期，默认看门狗约 30 秒过期、约 10 秒续一次。没抢到就睡 50 毫秒再查。抢到后先再读一次缓存，避免白打数据库。`unlock` 前用 `isHeldByCurrentThread()` 判断，Lua 核对线程标识后才删锁
+- [x] 商户类型整份列表缓存在 `cache:shop:type:`，TTL 30 分钟，没有套三件套
+- [x] 店铺不存在时 `Result.fail("店铺不存在")`
+- [x] 热门笔记用一次 `listByIds` 查用户，不再循环 `getById`
+- [x] 退出登录 `POST /user/logout` 仍返回「功能未完成」。不影响秒杀主线，没有要求就别补
 
-1. 补完登录：先用 Session 写通，再改成 Redis + token，并理解为什么要改
-   - [x] 发送验证码 POST /user/code
-   - [x] 验证码登录 POST /user/login
-   - [x] 登录拦截器 + GET /user/me
-   - [x] 改为 Redis + token（token 存的 UserDTO Hash，双拦截器 Refresh/Login）
-2. 商户缓存（原课程在登录后即做，属 Phase 4「Redis 缓存体系整理」方向，提前开始）
-   - [x] queryById 缓存旁路（Cache Aside）：GET /shop/{id} 先查 cache:shop:{id}，miss 落库回填，TTL 30 分钟
-   - [x] 缓存穿透：查库 miss 时写入空串占位缓存（TTL 2 分钟），命中空值直接返回不再打库
-   - [x] 缓存击穿：setnx 互斥锁（lock:shop:{id}），miss 抢锁，抢到查库回填删锁，没抢到 sleep 后重查缓存
-   - [x] 缓存雪崩：缓存 TTL 加 RandomUtil 随机抖动（0~5 分钟），错开过期时间
-   - [x] 商户类型缓存 ShopType：queryList() 整份列表存 cache:shop:type:，旁路缓存 + TTL 30 分钟（类型数据量小固定，未套用三件套）
-3. 修 Phase 1 发现的小问题
-   - [x] 店铺不存在时返回失败：GET /shop/{id} 查不到时返回 Result.fail("店铺不存在")，不再返回 success=true 但 data=null
-   - [x] 热门笔记 N+1 查询：queryHotBlog 由「循环 getById 查用户」改为「收集去重 userId → 一次 listByIds(IN) → Map 组装」，从 N+1 条 SQL 降为 2 条，保留 author name/icon 填充
-4. 基础整理：项目改名为 CityGo（应用层：启动类 HmDianPingApplication→CityGoApplication、spring.application.name→citygo、artifactId→citygo；包名 com.hmdp 与数据库 schema hmdp 保留——纯内部实现，改名高风险无收益）
+Phase 4，商户更新：
 
-CityGo 相对原课程的改动（登录部分）：
+- [x] `ShopServiceImpl.update` 加了事务。id 为空直接失败
+- [x] 先 `updateById`，再删 `cache:shop:{id}`。删除抛异常时，数据库修改回滚
+- [x] 1 秒后由单线程守护线程 `shop-cache-delay-delete` 再删一次。这次删除不挡住接口返回
+- [x] 第二次删除不看缓存里现在是什么。可能把刚回填的新数据也删掉，下次查询再查一次库。进程如果在这 1 秒内停掉，第二次删除就没了，剩下的靠 TTL
 
-- Session 中同时保存验证码和手机号，登录时校验两者对应，修复「给 A 发的验证码可以登录 B」的问题
-- 登录成功后删除验证码，验证码只能使用一次
-- 修复 login.html 协议单选框缺少 id、点击无反应的问题
-- 收窄登录拦截器白名单：原课程用 /shop/**、/voucher/**、/upload/** 放行，导致新增/修改店铺、新增优惠券、上传图片不登录也能调用；CityGo 只放行只读接口（/shop/*、/shop/of/*、/voucher/list/* 等）。注意：目前只要求登录，尚未区分商家和普通用户
+Phase 5 到 Phase 7，秒杀下单：
 
-在完成 Phase 2 之前：
+- [x] `seckill.lua` 一次做完：券不存在返回 5，未开始 3，已结束 4，库存不足 1，重复下单 2，通过则库存减 1、用户写入 Set 并返回 0。时间用 Redis 的 `TIME`，和券上的 `beginTime` / `endTime`（秒）比较
+- [x] 预占是 Hash `seckill:hold:{id}`，field 为用户 id，value 为订单号。订单号在 Lua 之前生成。`seckill:pending:{订单号}` 表示还没入库。旧的 `seckill:order:{id}` Set 只拦住这次改动之前已经抢到的人。取消后可以再抢。库里的旧券没有库存 key 时，Lua 返回 5
+- [x] 订单号：`RedisIdWorker`，2022-01-01 UTC 以来的秒数左移 32 位，再或上当天的 `INCR icr:order:yyyy:MM:dd`。`tb_voucher_order.id` 是 `IdType.INPUT`，不是自增
+- [x] 限流在秒杀 Lua 之前：`seckill_limit.lua`，key 是 `seckill:limit:{userId}`，1 秒 5 次。超过返回「操作太频繁，请稍后再试」
+- [x] 通过后发 `VoucherOrderMessage`（orderId、userId、voucherId）到持久队列 `seckill.order.queue`，走默认交换机，routing key 就是队列名。消息用 JSON
+- [x] 发布确认类型是 correlated，`mandatory` 为 true。最多等 3 秒。确认成功且没有被退回，接口才 `Result.ok(orderId)`
+- [x] broker 明确拒绝或退回时，执行 `seckill_restore.lua`：用户还在 Set 里才把库存加 1 并移出，调用两次也只加一次
+- [x] 消费者手动应答。通过接口调用 `createVoucherOrder`，事务提交之后才 `basicAck`
+- [x] 状态：`CREATED` 新订单；`EXISTS` 这个订单号已经在库里，直接应答，不再扣库存；`STOCK_FAILED` 数据库 `stock = stock - 1 AND stock > 0` 没更新到行，先回滚 Redis 再应答；`INVALID` 消息不合法，直接应答。别的异常 `basicNack` 并且重新入队
+- [x] 订单插入只写 id、userId、voucherId。状态 1 和 pay_type 1 用的是表的默认值
 
-不要开始 RabbitMQ、Elasticsearch、Caffeine 等后续改造。
+Phase 8，取消和支付：
+
+- [x] 订单状态：1 未支付，2 已支付，4 已取消
+- [x] 入库成功后发 `VoucherOrderCancelMessage`，里面只有 orderId，进等待队列 `seckill.order.delay`。队列参数 `x-message-ttl` 是 900000 毫秒，死信交换机 `seckill.order.dlx`，routing key `seckill.order.cancel`，消费队列 `seckill.order.cancel`
+- [x] 配置项 `citygo.seckill.unpaid-timeout` 当前是 `15m`。改这个时间之前，要先删掉已经存在的 `seckill.order.delay`，否则启动会报 PRECONDITION_FAILED
+- [x] 取消这条消息如果被 broker 明确拒绝，抛异常，创建订单的事务回滚。确认超过 3 秒只打日志，订单仍然算创建成功
+- [x] 取消分成两步。`markOrderCancelled` 只改数据库：未支付改为已取消，并退回 MySQL 库存，然后事务提交。`restoreRedisIfCancelled` 再按订单号回补 Redis。订单号对不上当前预占时，脚本不加库存。消费失败最多 3 次，间隔 5 秒，之后进入 `seckill.order.fail`
+- [x] `POST /voucher-order/pay/{id}` 要登录。`status=2` 且写入 `pay_time`，条件是这个订单属于当前用户并且还是未支付。不接第三方支付，也不再扣库存。和取消抢的是同一行 `status=1`
+
+## 故意留着、不要擅自补上的缝
+
+- 发布确认超过 3 秒，或发送结果不确定：接口仍返回订单号，Redis 预占不退。`GET /voucher-order/{id}` 在库里还没有行时返回处理中。连接不上 RabbitMQ 时才会在接口里回补。`SeckillPendingScheduler` 每 5 秒扫描空闲超过 10 秒的 `seckill:pending`：库里已有订单就删掉 key，没有就按原订单号补发。补发失败只打日志，不回补预占。
+- 进程停掉以后看门狗也停了，锁最多再留大约 30 秒。不要把这把锁套到秒杀上，秒杀仍用 Lua。
+- 页面 `shop-detail.html` 只提示订单号，没有接支付按钮。后端支付接口是好的。没有要求就不要改页面。
+
+## 简历上可以写、以及不能写
+
+可以写：Cache Aside 和三件套、延迟双删、Redisson 只锁商户缓存重建（看门狗和 Lua 解锁）、Redis token 与两个拦截器、Lua 里的时间/库存/一人一单、按用户限流、RabbitMQ 发布确认和手动应答、订单号幂等、扣库存失败回滚 Redis、15 分钟死信取消、支付只改状态、Docker 只跑 RabbitMQ。
+
+缓存旁路和 Lua 秒杀的思路来自黑马点评。简历写「自己实现过，能画出调用链」。CityGo 多做的是：活动时间放进 Lua、用 RabbitMQ 而不是 Redis Stream、确认/应答/幂等/回滚、死信取消、延迟双删、按用户限流。
+
+不能写：Elasticsearch、Caffeine、JWT 双 token、消息零丢失、评论收藏评分、Netty、本地消息表、任何 QPS。Redisson 只写商户缓存这把锁，不要写成秒杀也在用它。
 
 
 ---
@@ -550,25 +541,20 @@ MySQL
 
 # 14. 项目最终目标
 
-最终 CityGo 应该能够让开发者独立解释：
+现在已经做完的，开发者要能独立讲清楚：
 
-- 项目整体架构
-- 数据库设计
-- Redis 使用场景
-- 缓存问题
-- 分布式锁
-- Lua 原子操作
-- 秒杀设计
-- RabbitMQ
-- 消息可靠性
-- 消费幂等
-- Elasticsearch
-- 多级缓存
-- Feed
-- GEO
-- 性能测试
-- 性能优化
+- 商户缓存的读和更新，包括空值、Redisson 看门狗、Lua 解锁、过期抖动、延迟双删
+- 登录 token 和两个拦截器的顺序
+- Lua 秒杀的六个返回值，以及限流为什么放在它前面
+- 订单号怎么拼出来
+- 消息从确认、入队、手动应答、幂等、失败回滚，到 15 分钟取消的整条链
+- 支付和取消为什么都只改 `status = 1` 的那一行
+- 发布确认超时为什么不退 Redis 资格
 
-最终简历描述必须基于真实完成并理解的功能。
+下面这些没有做。可以知道它们解决什么问题，不能说成 CityGo 已经实现：
 
-不得将没有实现或无法解释的技术写入简历。
+- Elasticsearch、Feed、GEO
+- Caffeine 多级缓存
+- JMeter 和性能数字
+
+简历只写第 12 节里「可以写」的那一段。没有实现，或者实现了但讲不清调用链的，都不写。
