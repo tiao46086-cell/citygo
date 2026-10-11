@@ -219,20 +219,40 @@
           return;
         }
         let id = v.id;
-        // 秒杀抢购
         axios.post("/voucher-order/seckill/" + id)
         .then(({data}) => {
-          this.$confirm("抢到了，订单号 " + data + "。支付只修改订单状态。要现在支付吗？", "提示", {
-            confirmButtonText: "支付",
-            cancelButtonText: "稍后",
-            type: "success"
-          }).then(() => {
-            axios.post("/voucher-order/pay/" + data).then(() => {
-              this.$message.success("支付成功")
-            }).catch(err => this.$message.error(err))
-          }).catch(() => {
-            this.$message.success("订单号：" + data)
-          })
+          let orderId = String(data);
+          this.$message.success("请求已受理，正在确认订单");
+          this.waitUntilCreated(orderId, 0);
+        })
+        .catch(err => this.$message.error(err))
+      },
+      waitUntilCreated(orderId, times) {
+        axios.get("/voucher-order/" + orderId)
+        .then(({data}) => {
+          if (data.state === "处理中") {
+            if (times >= 30) {
+              this.$message.success("订单仍在处理中，订单号 " + orderId);
+              return;
+            }
+            setTimeout(() => this.waitUntilCreated(orderId, times + 1), 500);
+            return;
+          }
+          if (data.state === "未支付") {
+            this.$confirm("订单已创建，订单号 " + orderId + "。支付只修改订单状态。要现在支付吗？", "提示", {
+              confirmButtonText: "支付",
+              cancelButtonText: "稍后",
+              type: "success"
+            }).then(() => {
+              axios.post("/voucher-order/pay/" + orderId).then(() => {
+                this.$message.success("支付成功")
+              }).catch(err => this.$message.error(err))
+            }).catch(() => {
+              this.$message.success("订单号：" + orderId)
+            })
+            return;
+          }
+          this.$message.error("订单" + (data.state || "异常") + "，订单号 " + orderId);
         })
         .catch(err => this.$message.error(err))
       }

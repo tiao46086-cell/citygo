@@ -1,0 +1,6 @@
+.git
+.idea
+target
+src/test
+src/main/resources/nginx-1.18.0
+*.md

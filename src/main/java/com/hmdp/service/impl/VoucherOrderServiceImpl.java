@@ -21,24 +21,39 @@ import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.redis.connection.DataType;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import javax.annotation.Resource;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import static com.hmdp.utils.RedisConstants.PENDING_NEXT_FIELD;
+import static com.hmdp.utils.RedisConstants.PENDING_STATE_FIELD;
+import static com.hmdp.utils.RedisConstants.PENDING_STATE_RETRYING;
+import static com.hmdp.utils.RedisConstants.PENDING_STATE_STOPPED;
+import static com.hmdp.utils.RedisConstants.PENDING_STATE_WAITING;
+import static com.hmdp.utils.RedisConstants.PENDING_USER_FIELD;
+import static com.hmdp.utils.RedisConstants.PENDING_VOUCHER_FIELD;
 import static com.hmdp.utils.RedisConstants.SECKILL_HOLD_KEY;
 import static com.hmdp.utils.RedisConstants.SECKILL_LIMIT_KEY;
 import static com.hmdp.utils.RedisConstants.SECKILL_ORDER_KEY;
+import static com.hmdp.utils.RedisConstants.SECKILL_PENDING_DELAY_MILLIS;
 import static com.hmdp.utils.RedisConstants.SECKILL_PENDING_KEY;
+import static com.hmdp.utils.RedisConstants.SECKILL_RESTORE_KEY;
 import static com.hmdp.utils.RedisConstants.SECKILL_STOCK_KEY;
 import static com.hmdp.utils.RedisConstants.SECKILL_VOUCHER_KEY;
 
@@ -120,7 +135,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 keys,
                 userId.toString(),
                 orderId.toString(),
-                voucherId.toString()
+                voucherId.toString(),
+                String.valueOf(System.currentTimeMillis() + SECKILL_PENDING_DELAY_MILLIS)
         );
         if (result == null) {
             return Result.fail("秒杀失败");
@@ -144,25 +160,25 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         } catch (RuntimeException e) {
             // 已经调用了发送，但不能确定进没进队列。预占留着，查询接口会看到处理中
             log.error("秒杀消息发送结果不确定, orderId={}", orderId, e);
-            return Result.ok(orderId);
+            return Result.ok(orderId.toString());
         }
         try {
             CorrelationData.Confirm confirm = correlationData.getFuture().get(CONFIRM_WAIT_SECONDS, TimeUnit.SECONDS);
             boolean accepted = confirm != null && confirm.isAck() && correlationData.getReturned() == null;
             if (accepted) {
-                return Result.ok(orderId);
+                return Result.ok(orderId.toString());
             }
             log.error("秒杀消息被拒绝, orderId={}, confirm={}", orderId, confirm);
         } catch (TimeoutException e) {
             log.error("等待发布确认超时, orderId={}", orderId);
-            return Result.ok(orderId);
+            return Result.ok(orderId.toString());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.error("等待发布确认被中断, orderId={}", orderId);
-            return Result.ok(orderId);
+            return Result.ok(orderId.toString());
         } catch (ExecutionException e) {
             log.error("发布确认失败, orderId={}", orderId, e);
-            return Result.ok(orderId);
+            return Result.ok(orderId.toString());
         }
         restoreSeckill(voucherId, userId, orderId);
         return Result.fail("下单失败，请重试");
@@ -182,8 +198,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             view.setState(orderState(order));
             return Result.ok(view);
         }
-        String pending = stringRedisTemplate.opsForValue().get(SECKILL_PENDING_KEY + orderId);
-        if (pending != null && pending.startsWith(userId + ":")) {
+        // 只读预占。不能 GET 字符串或改 nextRetryAt，否则补发时间会被查询推迟
+        if (pendingBelongsTo(orderId, userId)) {
             VoucherOrderStatus view = new VoucherOrderStatus();
             view.setOrderId(orderId);
             view.setState("处理中");
@@ -202,7 +218,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
         if (getById(message.getOrderId()) != null) {
             log.info("秒杀订单已存在, orderId={}", message.getOrderId());
-            stringRedisTemplate.delete(SECKILL_PENDING_KEY + message.getOrderId());
+            deletePendingAfterCommit(message.getOrderId());
             return VoucherOrderCreateStatus.EXISTS;
         }
         // 先插入订单。主键冲突说明另一条相同消息已经在写，这次不能再扣库存
@@ -214,7 +230,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             save(voucherOrder);
         } catch (DuplicateKeyException e) {
             log.info("秒杀订单已存在, orderId={}", message.getOrderId());
-            stringRedisTemplate.delete(SECKILL_PENDING_KEY + message.getOrderId());
+            deletePendingAfterCommit(message.getOrderId());
             return VoucherOrderCreateStatus.EXISTS;
         }
         boolean success = seckillVoucherService.update()
@@ -229,7 +245,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             return VoucherOrderCreateStatus.STOCK_FAILED;
         }
         scheduleUnpaidCancel(message.getOrderId());
-        stringRedisTemplate.delete(SECKILL_PENDING_KEY + message.getOrderId());
+        deletePendingAfterCommit(message.getOrderId());
         return VoucherOrderCreateStatus.CREATED;
     }
 
@@ -289,6 +305,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if (!stockRestored) {
             throw new IllegalStateException("秒杀库存回补失败, orderId=" + orderId);
         }
+        // 提交前先记下补偿。进程若在回补 Redis 前退出，扫描器还能按订单号重试
+        rememberRestore(orderId, order.getUserId(), order.getVoucherId());
     }
 
     @Override
@@ -296,11 +314,58 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if (orderId == null) {
             return;
         }
+        String restoreKey = SECKILL_RESTORE_KEY + orderId;
         VoucherOrder order = getById(orderId);
         if (order == null || order.getStatus() == null || order.getStatus() != ORDER_STATUS_CANCELLED) {
+            stringRedisTemplate.delete(restoreKey);
             return;
         }
-        restoreSeckill(order.getVoucherId(), order.getUserId(), orderId);
+        Long restored = restoreSeckill(order.getVoucherId(), order.getUserId(), orderId);
+        if (restored == null) {
+            stringRedisTemplate.opsForHash().put(restoreKey, PENDING_NEXT_FIELD,
+                    String.valueOf(System.currentTimeMillis() + SECKILL_PENDING_DELAY_MILLIS));
+            return;
+        }
+        // 1 是这次回补成功，0 是预占已经不是这一单。两种都不用再试
+        stringRedisTemplate.delete(restoreKey);
+    }
+
+    @Override
+    public void markPendingRetrying(Long orderId) {
+        putPendingState(orderId, PENDING_STATE_RETRYING);
+    }
+
+    @Override
+    public void markPendingStopped(Long orderId) {
+        putPendingState(orderId, PENDING_STATE_STOPPED);
+    }
+
+    @Override
+    public void postponePendingRetry(Long orderId) {
+        if (orderId == null) {
+            return;
+        }
+        String key = SECKILL_PENDING_KEY + orderId;
+        Object state = stringRedisTemplate.opsForHash().get(key, PENDING_STATE_FIELD);
+        if (!PENDING_STATE_WAITING.equals(state)) {
+            return;
+        }
+        stringRedisTemplate.opsForHash().put(key, PENDING_NEXT_FIELD,
+                String.valueOf(System.currentTimeMillis() + SECKILL_PENDING_DELAY_MILLIS));
+    }
+
+    @Override
+    public List<Long> findExpiredUnpaidIds(int limit) {
+        int size = Math.max(1, Math.min(limit, 50));
+        return query()
+                .select("id")
+                .eq("status", ORDER_STATUS_UNPAID)
+                .apply("create_time <= DATE_SUB(NOW(), INTERVAL {0} SECOND)", unpaidTimeout.getSeconds())
+                .last("LIMIT " + size)
+                .list()
+                .stream()
+                .map(VoucherOrder::getId)
+                .collect(Collectors.toList());
     }
 
     private void scheduleUnpaidCancel(Long orderId) {
@@ -324,7 +389,75 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
     }
 
-    private void restoreSeckill(Long voucherId, Long userId, Long orderId) {
+    private boolean pendingBelongsTo(Long orderId, Long userId) {
+        String key = SECKILL_PENDING_KEY + orderId;
+        DataType type = stringRedisTemplate.type(key);
+        if (type == DataType.HASH) {
+            Object pendingUser = stringRedisTemplate.opsForHash().get(key, PENDING_USER_FIELD);
+            return pendingUser != null && userId.toString().equals(pendingUser.toString());
+        }
+        if (type == DataType.STRING) {
+            String pending = stringRedisTemplate.opsForValue().get(key);
+            return pending != null && pending.startsWith(userId + ":");
+        }
+        return false;
+    }
+
+    private void deletePendingAfterCommit(Long orderId) {
+        String key = SECKILL_PENDING_KEY + orderId;
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            stringRedisTemplate.delete(key);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                stringRedisTemplate.delete(key);
+            }
+        });
+    }
+
+    private void rememberRestore(Long orderId, Long userId, Long voucherId) {
+        Map<String, String> fields = new HashMap<>();
+        fields.put(PENDING_USER_FIELD, String.valueOf(userId));
+        fields.put(PENDING_VOUCHER_FIELD, String.valueOf(voucherId));
+        fields.put(PENDING_NEXT_FIELD, String.valueOf(System.currentTimeMillis() + SECKILL_PENDING_DELAY_MILLIS));
+        stringRedisTemplate.opsForHash().putAll(SECKILL_RESTORE_KEY + orderId, fields);
+    }
+
+    private void putPendingState(Long orderId, String state) {
+        if (orderId == null) {
+            return;
+        }
+        String key = SECKILL_PENDING_KEY + orderId;
+        DataType type = stringRedisTemplate.type(key);
+        if (type == null || type == DataType.NONE) {
+            return;
+        }
+        if (type == DataType.STRING) {
+            String value = stringRedisTemplate.opsForValue().get(key);
+            if (value == null) {
+                return;
+            }
+            String[] parts = value.split(":", 2);
+            if (parts.length != 2) {
+                return;
+            }
+            Map<String, String> fields = new HashMap<>();
+            fields.put(PENDING_USER_FIELD, parts[0]);
+            fields.put(PENDING_VOUCHER_FIELD, parts[1]);
+            fields.put(PENDING_STATE_FIELD, state);
+            fields.put(PENDING_NEXT_FIELD, "0");
+            stringRedisTemplate.delete(key);
+            stringRedisTemplate.opsForHash().putAll(key, fields);
+            return;
+        }
+        if (type == DataType.HASH) {
+            stringRedisTemplate.opsForHash().put(key, PENDING_STATE_FIELD, state);
+        }
+    }
+
+    private Long restoreSeckill(Long voucherId, Long userId, Long orderId) {
         Long restored = stringRedisTemplate.execute(
                 RESTORE_SCRIPT,
                 Arrays.asList(
@@ -336,6 +469,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 orderId.toString()
         );
         log.info("回滚秒杀资格, voucherId={}, userId={}, orderId={}, restored={}", voucherId, userId, orderId, restored);
+        return restored;
     }
 
     private boolean unpaidExpired(Long orderId) {

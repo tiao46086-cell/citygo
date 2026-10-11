@@ -66,6 +66,23 @@ CREATE TABLE `tb_blog_comments`  (
 -- ----------------------------
 
 -- ----------------------------
+-- Table structure for tb_blog_favorite
+-- ----------------------------
+DROP TABLE IF EXISTS `tb_blog_favorite`;
+CREATE TABLE `tb_blog_favorite`  (
+  `id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `user_id` bigint(20) UNSIGNED NOT NULL COMMENT '用户id',
+  `blog_id` bigint(20) UNSIGNED NOT NULL COMMENT '探店id',
+  `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uk_user_blog`(`user_id`, `blog_id`) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci ROW_FORMAT = Compact;
+
+-- ----------------------------
+-- Records of tb_blog_favorite
+-- ----------------------------
+
+-- ----------------------------
 -- Table structure for tb_follow
 -- ----------------------------
 DROP TABLE IF EXISTS `tb_follow`;

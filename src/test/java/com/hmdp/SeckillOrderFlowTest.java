@@ -62,6 +62,26 @@ public class SeckillOrderFlowTest {
         stringRedisTemplate.delete("seckill:voucher:" + VOUCHER_ID);
         stringRedisTemplate.delete("seckill:pending:" + ORDER_ID);
         stringRedisTemplate.delete("seckill:pending:" + NEXT_ORDER_ID);
+        stringRedisTemplate.delete("seckill:restore:" + ORDER_ID);
+        stringRedisTemplate.delete("seckill:restore:" + NEXT_ORDER_ID);
+    }
+
+    @Test
+    public void queryDoesNotMovePendingRetryTime() {
+        prepareVoucher(1);
+        stringRedisTemplate.opsForValue().set("seckill:stock:" + VOUCHER_ID, "1");
+        stringRedisTemplate.opsForHash().put("seckill:voucher:" + VOUCHER_ID, "beginTime", "1");
+        stringRedisTemplate.opsForHash().put("seckill:voucher:" + VOUCHER_ID, "endTime", "9999999999");
+        Assertions.assertEquals(Long.valueOf(0), runSeckill(ORDER_ID));
+        String before = (String) stringRedisTemplate.opsForHash().get("seckill:pending:" + ORDER_ID, "nextRetryAt");
+        UserDTO user = new UserDTO();
+        user.setId(USER_ID);
+        UserHolder.saveUser(user);
+        Result result = voucherOrderService.queryOrder(ORDER_ID);
+        String after = (String) stringRedisTemplate.opsForHash().get("seckill:pending:" + ORDER_ID, "nextRetryAt");
+        Assertions.assertEquals("0", before);
+        Assertions.assertEquals(before, after);
+        Assertions.assertEquals("处理中", ((com.hmdp.dto.VoucherOrderStatus) result.getData()).getState());
     }
 
     @Test
@@ -171,7 +191,7 @@ public class SeckillOrderFlowTest {
                 "seckill:voucher:" + VOUCHER_ID,
                 "seckill:hold:" + VOUCHER_ID,
                 "seckill:pending:" + orderId
-        ), String.valueOf(USER_ID), String.valueOf(orderId), String.valueOf(VOUCHER_ID));
+        ), String.valueOf(USER_ID), String.valueOf(orderId), String.valueOf(VOUCHER_ID), "0");
     }
 
     private Long runRestore(long orderId) {

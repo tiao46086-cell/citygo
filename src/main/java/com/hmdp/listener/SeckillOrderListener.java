@@ -5,11 +5,12 @@ import com.hmdp.dto.VoucherOrderCancelMessage;
 import com.hmdp.dto.VoucherOrderCreateStatus;
 import com.hmdp.dto.VoucherOrderMessage;
 import com.hmdp.service.IVoucherOrderService;
+import com.hmdp.utils.ConfirmedSender;
 import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessagePostProcessor;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.support.AmqpHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Component;
@@ -29,13 +30,13 @@ public class SeckillOrderListener {
     private IVoucherOrderService voucherOrderService;
 
     @Resource
-    private RabbitTemplate rabbitTemplate;
+    private ConfirmedSender confirmedSender;
 
     @RabbitListener(queues = RabbitMqConfig.SECKILL_ORDER_QUEUE)
     public void listenSeckillOrder(VoucherOrderMessage message, Channel channel,
                                     @Header(AmqpHeaders.DELIVERY_TAG) long deliveryTag,
-                                    @Header(name = RETRY_HEADER, required = false) Object retry) throws IOException {
-        int times = retryCount(retry);
+                                    Message raw) throws IOException {
+        int times = retryCount(header(raw));
         if (times >= MAX_ATTEMPTS) {
             park(channel, deliveryTag, message, times);
             return;
@@ -55,8 +56,8 @@ public class SeckillOrderListener {
     @RabbitListener(queues = RabbitMqConfig.SECKILL_ORDER_CANCEL_QUEUE)
     public void listenCancelOrder(VoucherOrderCancelMessage message, Channel channel,
                                    @Header(AmqpHeaders.DELIVERY_TAG) long deliveryTag,
-                                   @Header(name = RETRY_HEADER, required = false) Object retry) throws IOException {
-        int times = retryCount(retry);
+                                   Message raw) throws IOException {
+        int times = retryCount(header(raw));
         if (times >= MAX_ATTEMPTS) {
             park(channel, deliveryTag, message, times);
             return;
@@ -82,24 +83,56 @@ public class SeckillOrderListener {
             park(channel, deliveryTag, payload, next);
             return;
         }
-        try {
-            rabbitTemplate.convertAndSend(retryQueue, payload, retryHeader(next));
-            channel.basicAck(deliveryTag, false);
-            log.warn("消息 {} 秒后重试, times={}, payload={}", RabbitMqConfig.SECKILL_RETRY_DELAY_MILLIS / 1000, next, payload);
-        } catch (RuntimeException sendError) {
-            log.error("重试消息没有发出去，暂时重新入队, payload={}", payload, sendError);
+        // 先标成重试中，扫描器才不会把没有重试头的新消息再塞进来
+        if (!markForwarded(payload, false)) {
             channel.basicNack(deliveryTag, false, true);
+            return;
         }
+        ConfirmedSender.Outcome outcome = confirmedSender.send(retryQueue, payload, retryHeader(next));
+        if (outcome != ConfirmedSender.Outcome.ACCEPTED) {
+            log.error("重试消息没有确认进入队列，原消息重新入队, payload={}, outcome={}", payload, outcome);
+            channel.basicNack(deliveryTag, false, true);
+            return;
+        }
+        channel.basicAck(deliveryTag, false);
+        log.warn("消息 {} 秒后重试, times={}, payload={}", RabbitMqConfig.SECKILL_RETRY_DELAY_MILLIS / 1000, next, payload);
     }
 
     private void park(Channel channel, long deliveryTag, Object payload, int times) throws IOException {
-        try {
-            rabbitTemplate.convertAndSend(RabbitMqConfig.SECKILL_ORDER_FAIL_QUEUE, payload, retryHeader(times));
-            channel.basicAck(deliveryTag, false);
-            log.error("消费失败次数用完，已进入失败队列, times={}, payload={}", times, payload);
-        } catch (RuntimeException sendError) {
-            log.error("失败队列没有写进去，暂时重新入队, payload={}", payload, sendError);
+        if (!markForwarded(payload, true)) {
             channel.basicNack(deliveryTag, false, true);
+            return;
+        }
+        ConfirmedSender.Outcome outcome = confirmedSender.send(
+                RabbitMqConfig.SECKILL_ORDER_FAIL_QUEUE, payload, retryHeader(times));
+        if (outcome != ConfirmedSender.Outcome.ACCEPTED) {
+            log.error("失败队列没有确认收到，原消息重新入队, payload={}, outcome={}", payload, outcome);
+            channel.basicNack(deliveryTag, false, true);
+            return;
+        }
+        channel.basicAck(deliveryTag, false);
+        log.error("消费失败次数用完，已进入失败队列, times={}, payload={}", times, payload);
+    }
+
+    /**
+     * 下单消息转走之后要改预占状态。取消消息没有预占，不用改。
+     * @return false 表示状态没写上，调用方不要应答原消息
+     */
+    private boolean markForwarded(Object payload, boolean stopped) {
+        if (!(payload instanceof VoucherOrderMessage)) {
+            return true;
+        }
+        Long orderId = ((VoucherOrderMessage) payload).getOrderId();
+        try {
+            if (stopped) {
+                voucherOrderService.markPendingStopped(orderId);
+            } else {
+                voucherOrderService.markPendingRetrying(orderId);
+            }
+            return true;
+        } catch (RuntimeException e) {
+            log.error("更新预占状态失败, orderId={}, stopped={}", orderId, stopped, e);
+            return false;
         }
     }
 
@@ -110,6 +143,13 @@ public class SeckillOrderListener {
         };
     }
 
+    private Object header(Message raw) {
+        if (raw == null || raw.getMessageProperties() == null) {
+            return null;
+        }
+        return raw.getMessageProperties().getHeader(RETRY_HEADER);
+    }
+
     private int retryCount(Object retry) {
         if (retry instanceof Number) {
             return ((Number) retry).intValue();
@@ -117,6 +157,10 @@ public class SeckillOrderListener {
         if (retry == null) {
             return 0;
         }
-        return Integer.parseInt(retry.toString());
+        try {
+            return Integer.parseInt(retry.toString());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 }

@@ -20,4 +20,10 @@ public interface IUserService extends IService<User> {
     Result sendCode(String phone);
 
     Result login(LoginFormDTO loginForm, HttpSession session);
+
+    /**
+     * 删掉当前 token 对应的登录态。别的设备上的 token 还在。
+     * @param token 请求头 authorization 里的值
+     */
+    Result logout(String token);
 }

@@ -4,12 +4,15 @@ import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
 import com.hmdp.service.IShopService;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -17,7 +20,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
+import java.time.Duration;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -55,8 +60,38 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     @Resource
     private RedissonClient redissonClient;
 
+    @Value("${citygo.shop-cache.maximum-size:1000}")
+    private long localCacheMaxSize;
+
+    @Value("${citygo.shop-cache.ttl:60s}")
+    private Duration localCacheTtl;
+
+    /** 店铺详情。expireAfterWrite，空结果不放进来。recordStats 打开，方便以后读命中率 */
+    private Cache<Long, Shop> localCache;
+
+    @PostConstruct
+    void initLocalCache() {
+        localCache = Caffeine.newBuilder()
+                .maximumSize(localCacheMaxSize)
+                .expireAfterWrite(localCacheTtl)
+                .recordStats()
+                .build();
+    }
+
     @Override
     public Shop queryById(Long id) {
+        Shop cached = localCache.getIfPresent(id);
+        if (cached != null) {
+            return cached;
+        }
+        Shop shop = loadThroughRedis(id);
+        if (shop != null) {
+            localCache.put(id, shop);
+        }
+        return shop;
+    }
+
+    private Shop loadThroughRedis(Long id) {
         String key = CACHE_SHOP_KEY + id;
         long deadline = System.currentTimeMillis() + CACHE_LOCK_WAIT_MILLIS;
         while (true) {
@@ -116,33 +151,35 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         if (!updateById(shop)) {
             return Result.fail("店铺不存在");
         }
-        String cacheKey = CACHE_SHOP_KEY + id;
-        // 提交成功后再删。删失败只打日志，过期时间仍会清掉旧数据
+        // 提交成功后再删。本地缓存和 Redis 分开删，一边失败不影响另一边
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    deleteCacheTwice(cacheKey);
+                    deleteCacheTwice(id);
                 }
             });
         } else {
-            deleteCacheTwice(cacheKey);
+            deleteCacheTwice(id);
         }
         return Result.ok();
     }
 
-    private void deleteCacheTwice(String cacheKey) {
+    private void deleteCacheTwice(Long id) {
+        deleteLocalAndRedis(id);
+        CACHE_DELAY_EXECUTOR.schedule(() -> deleteLocalAndRedis(id), CACHE_DELAY_DELETE_MILLIS, TimeUnit.MILLISECONDS);
+    }
+
+    private void deleteLocalAndRedis(Long id) {
         try {
-            stringRedisTemplate.delete(cacheKey);
+            localCache.invalidate(id);
         } catch (RuntimeException e) {
-            log.error("删除商户缓存失败, key={}", cacheKey, e);
+            log.error("删除商户本地缓存失败, id={}", id, e);
         }
-        CACHE_DELAY_EXECUTOR.schedule(() -> {
-            try {
-                stringRedisTemplate.delete(cacheKey);
-            } catch (RuntimeException e) {
-                log.error("延迟删除商户缓存失败, key={}", cacheKey, e);
-            }
-        }, CACHE_DELAY_DELETE_MILLIS, TimeUnit.MILLISECONDS);
+        try {
+            stringRedisTemplate.delete(CACHE_SHOP_KEY + id);
+        } catch (RuntimeException e) {
+            log.error("删除商户缓存失败, key={}", CACHE_SHOP_KEY + id, e);
+        }
     }
 }

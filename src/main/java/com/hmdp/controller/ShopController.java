@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.Shop;
 import com.hmdp.service.IShopService;
+import com.hmdp.utils.AdminGuard;
 import com.hmdp.utils.SystemConstants;
 import org.springframework.web.bind.annotation.*;
 
@@ -25,6 +26,9 @@ public class ShopController {
 
     @Resource
     public IShopService shopService;
+
+    @Resource
+    private AdminGuard adminGuard;
 
     /**
      * 根据id查询商铺信息
@@ -48,7 +52,10 @@ public class ShopController {
      */
     @PostMapping
     public Result saveShop(@RequestBody Shop shop) {
-        // 写入数据库
+        Result denied = adminGuard.requireAdmin();
+        if (denied != null) {
+            return denied;
+        }
         shopService.save(shop);
         // 返回店铺id
         return Result.ok(shop.getId());
@@ -61,7 +68,10 @@ public class ShopController {
      */
     @PutMapping
     public Result updateShop(@RequestBody Shop shop) {
-        // 改库并删除缓存，避免 GET /shop/{id} 在 TTL 内一直读到旧数据
+        Result denied = adminGuard.requireAdmin();
+        if (denied != null) {
+            return denied;
+        }
         return shopService.update(shop);
     }
 

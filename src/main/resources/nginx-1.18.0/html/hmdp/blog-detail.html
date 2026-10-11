@@ -85,49 +85,27 @@
     <div class="blog-divider"></div>
     <div class="blog-comments">
       <div class="comments-head">
-        <div>网友评价 <span>（119）</span></div>
-        <div><i class="el-icon-arrow-right"></i></div>
+        <div>评论 <span>（{{commentTotal}}）</span></div>
+      </div>
+      <div style="display: flex; margin-top: 10px;">
+        <input v-model="commentText" placeholder="写一条评论" style="flex: 1; border: 1px solid #eee; padding: 6px;">
+        <div @click="submitComment" style="margin-left: 8px; line-height: 32px; color: #ff6633;">发布</div>
       </div>
       <div class="comment-list">
-        <div class="comment-box" v-for="i in 3" :key="i">
+        <div v-if="comments.length === 0" style="color: #82848a; font-size: 13px;">还没有评论</div>
+        <div class="comment-box" v-for="c in comments" :key="c.id">
           <div class="comment-icon">
-            <img
-                src="https://p0.meituan.net/userheadpicbackend/57e44d6eba01aad0d8d711788f30a126549507.jpg%4048w_48h_1e_1c_1l%7Cwatermark%3D0"
-                alt="">
+            <img :src="c.icon || '/imgs/icons/default-icon.png'" alt="">
           </div>
           <div class="comment-info">
-            <div class="comment-user">叶小乙 <span>Lv5</span></div>
-            <div style="display: flex;">
-              打分
-              <el-rate disabled v-model="4.5"></el-rate>
+            <div class="comment-user">{{c.name || '用户'}}
+              <span v-if="user && c.userId === user.id" @click="removeComment(c)" style="background: #eee; color: #666;">删除</span>
             </div>
-            <div style="padding: 5px 0; font-size: 14px">
-              某平台上买的券，价格可以当工作餐吃，虽然价格便宜，但是这家店一点都没有...
-            </div>
-            <div class="comment-images">
-              <img
-                  src="https://qcloud.dpfile.com/pc/6T7MfXzx7USPIkSy7jzm40qZSmlHUF2jd-FZUL6WpjE9byagjLlrseWxnl1LcbuSGybIjx5eX6WNgCPvcASYAw.jpg"
-                  alt="">
-              <img
-                  src="https://qcloud.dpfile.com/pc/sZ5q-zgglv4VXEWU71xCFjnLM_jUHq-ylq0GKivtrz3JksWQ1f7oBWZsxm1DWgcaGybIjx5eX6WNgCPvcASYAw.jpg"
-                  alt="">
-              <img
-                  src="https://qcloud.dpfile.com/pc/xZy6W4NwuRFchlOi43DVLPFsx7KWWvPqifE1JTe_jreqdsBYA9CFkeSm2ZlF0OVmGybIjx5eX6WNgCPvcASYAw.jpg"
-                  alt="">
-              <img
-                  src="https://qcloud.dpfile.com/pc/xZy6W4NwuRFchlOi43DVLPFsx7KWWvPqifE1JTe_jreqdsBYA9CFkeSm2ZlF0OVmGybIjx5eX6WNgCPvcASYAw.jpg"
-                  alt="">
-            </div>
-            <div>
-              浏览641 &nbsp;&nbsp;&nbsp;&nbsp;评论5
-            </div>
+            <div style="padding: 5px 0; font-size: 14px">{{c.content}}</div>
           </div>
         </div>
-        <div
-            style="display: flex; justify-content: space-between;padding: 15px 0; border-top: 1px solid #f1f1f1; margin-top: 10px;">
-          <div>查看全部119条评价</div>
-          <div><i class="el-icon-arrow-right"></i></div>
-        </div>
+        <div v-if="comments.length < commentTotal" @click="queryComments(commentPage + 1)"
+             style="text-align: center; color: #82848a; font-size: 13px;">查看更多</div>
       </div>
     </div>
     <div class="blog-divider"></div>
@@ -141,7 +119,11 @@
         <span :class="{liked: blog.isLike}">{{blog.liked}}</span>
       </div>
     </div>
-    <div style="width: 40%">
+    <div style="width: 40%; text-align: center;" @click="toggleFavorite">
+      <div :style="{color: favorited ? '#ff6633' : '#82848a'}">
+        <i :class="favorited ? 'el-icon-star-on' : 'el-icon-star-off'" style="font-size: 22px;"></i>
+        <div style="font-size: 12px;">{{favorited ? '已收藏' : '收藏'}}</div>
+      </div>
     </div>
     <div class="foot-box">
       <div class="foot-view"><i class="el-icon-chat-square"></i></div>
@@ -166,8 +148,13 @@
       blog: {},
       shop: {},
       likes: [],
+      comments: [],
+      commentText: "",
+      commentTotal: 0,
+      commentPage: 1,
       user: {}, // 登录用户
       followed: false, // 是否关注了
+      favorited: false,
       _width: 0,
       duration: 300,
       container: null,
@@ -216,7 +203,9 @@
             this.$nextTick(this.init);
             this.queryShopById(data.shopId)
             this.queryLikeList(id);
+            this.queryComments(1);
             this.queryLoginUser();
+            this.isFavorited();
           })
           .catch(this.$message.error)
       },
@@ -227,6 +216,34 @@
             this.shop = data
           })
           .catch(this.$message.error)
+      },
+      queryComments(page) {
+        axios.get("/blog-comments/of/blog/" + this.blog.id + "?current=" + (page || 1))
+          .then(resp => {
+            let rows = resp.data || [];
+            this.commentTotal = resp.total || 0;
+            if (!page || page === 1) {
+              this.comments = rows;
+              this.commentPage = 1;
+            } else {
+              this.comments = this.comments.concat(rows);
+              this.commentPage = page;
+            }
+          })
+          .catch(this.$message.error)
+      },
+      submitComment() {
+        axios.post("/blog-comments", { blogId: this.blog.id, content: this.commentText })
+          .then(() => {
+            this.commentText = "";
+            this.queryComments(1);
+          })
+          .catch(err => this.$message.error(err))
+      },
+      removeComment(c) {
+        axios.delete("/blog-comments/" + c.id)
+          .then(() => this.queryComments(1))
+          .catch(err => this.$message.error(err))
       },
       queryLikeList(id){
         axios.get("/blog/likes/" + id)
@@ -247,6 +264,21 @@
           .catch(err => {
             this.$message.error(err)
           })
+      },
+      isFavorited(){
+        axios.get("/blog-favorite/or/not/" + this.blog.id)
+          .then(({data}) => this.favorited = !!data)
+          .catch(this.$message.error)
+      },
+      toggleFavorite(){
+        let request = this.favorited
+          ? axios.delete("/blog-favorite/" + this.blog.id)
+          : axios.put("/blog-favorite/" + this.blog.id);
+        request.then(() => {
+            this.favorited = !this.favorited;
+            this.$message.success(this.favorited ? "已收藏" : "已取消收藏");
+          })
+          .catch(this.$message.error)
       },
       isFollowed(){
         axios.get("/follow/or/not/" + this.blog.userId)

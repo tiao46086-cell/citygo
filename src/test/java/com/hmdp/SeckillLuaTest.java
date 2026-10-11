@@ -56,6 +56,9 @@ public class SeckillLuaTest {
         Long first = eval(seckillScript, "7", "100");
         Assertions.assertEquals(Long.valueOf(0), first);
         Assertions.assertEquals("0", redis.get(stock()));
+        Assertions.assertEquals("7", redis.hget(pending("100"), "userId"));
+        Assertions.assertEquals("waiting", redis.hget(pending("100"), "state"));
+        Assertions.assertEquals("99001", redis.hget(pending("100"), "voucherId"));
 
         Long wrong = evalRestore("7", "200");
         Assertions.assertEquals(Long.valueOf(0), wrong);
@@ -83,7 +86,7 @@ public class SeckillLuaTest {
     private Long eval(String script, String userId, String orderId) {
         return redis.eval(script, ScriptOutputType.INTEGER,
                 new String[]{stock(), legacy(), voucher(), hold(), pending(orderId)},
-                userId, orderId, VOUCHER);
+                userId, orderId, VOUCHER, "0");
     }
 
     private Long evalRestore(String userId, String orderId) {

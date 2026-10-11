@@ -5,7 +5,7 @@ spring:
     name: citygo
   datasource:
     driver-class-name: com.mysql.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3306/hmdp?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://${CITYGO_DB_HOST:127.0.0.1}:${CITYGO_DB_PORT:3306}/hmdp?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
     username: ${CITYGO_DB_USERNAME:root}
     password: ${CITYGO_DB_PASSWORD:1234}
   redis:
@@ -18,8 +18,8 @@ spring:
         min-idle: 1
         time-between-eviction-runs: 10s
   rabbitmq:
-    host: 127.0.0.1
-    port: 5672
+    host: ${CITYGO_RABBITMQ_HOST:127.0.0.1}
+    port: ${CITYGO_RABBITMQ_PORT:5672}
     # Docker 里的 RabbitMQ 不把宿主机连接当成 guest 的本机连接，所以不用 guest
     username: ${CITYGO_RABBITMQ_USERNAME:citygo}
     password: ${CITYGO_RABBITMQ_PASSWORD:citygo}
@@ -38,6 +38,12 @@ spring:
 citygo:
   # 图片目录。不设环境变量时用项目里自带的页面图片
   upload-dir: ${CITYGO_UPLOAD_DIR:src/main/resources/nginx-1.18.0/html/hmdp/imgs}
+  # 逗号分隔的用户 id。空表示不能新增或修改商户，也不能发券
+  admin-user-ids: ${CITYGO_ADMIN_USER_IDS:}
+  shop-cache:
+    # 只缓存店铺详情。空结果不放进来。单机内存，不向其他实例广播失效
+    maximum-size: ${CITYGO_SHOP_CACHE_MAX:1000}
+    ttl: ${CITYGO_SHOP_CACHE_TTL:60s}
   seckill:
     # 未支付超过这段时间就取消。改数值后要删除队列 seckill.order.delay 再启动
     unpaid-timeout: 15m

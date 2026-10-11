@@ -6,6 +6,8 @@ import com.hmdp.dto.VoucherOrderCreateStatus;
 import com.hmdp.dto.VoucherOrderMessage;
 import com.hmdp.entity.VoucherOrder;
 
+import java.util.List;
+
 /**
  * <p>
  *  服务类
@@ -19,7 +21,7 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
     /**
      * 秒杀下单：Lua 通过后发送消息，并等待 RabbitMQ 的发布确认
      * @param voucherId 优惠券 id，对应 tb_seckill_voucher.voucher_id
-     * @return 确认被队列接受时 data 为订单 id。数据库由消费者稍后写入
+     * @return 受理时 data 是订单号字符串。数据库由消费者稍后写入
      */
     Result seckillVoucher(Long voucherId);
 
@@ -44,7 +46,7 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
     VoucherOrderCreateStatus createVoucherOrder(VoucherOrderMessage message);
 
     /**
-     * 只改数据库：未支付改为已取消，并退回 MySQL 库存。不碰 Redis，避免和数据库事务缠在一起。
+     * 未支付改为已取消，并退回 MySQL 库存。提交前只记下回补任务，不在这个事务里改秒杀资格。
      * @param orderId 订单号
      */
     void markOrderCancelled(Long orderId);
@@ -54,4 +56,29 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
      * @param orderId 订单号
      */
     void restoreRedisIfCancelled(Long orderId);
+
+    /**
+     * 消费失败后改由重试队列接手。扫描器看到这个状态就不再补发，避免把次数清零。
+     * @param orderId 订单号
+     */
+    void markPendingRetrying(Long orderId);
+
+    /**
+     * 已经进失败队列，不再自动补发。
+     * @param orderId 订单号
+     */
+    void markPendingStopped(Long orderId);
+
+    /**
+     * 补发已经发出或结果不确定时，把下次补发时间推后。查询订单不会调用这里。
+     * @param orderId 订单号
+     */
+    void postponePendingRetry(Long orderId);
+
+    /**
+     * 支付期限已过、仍是未支付的订单。延迟消息丢了时由扫描器取消。
+     * @param limit 最多取多少条
+     * @return 订单号
+     */
+    List<Long> findExpiredUnpaidIds(int limit);
 }

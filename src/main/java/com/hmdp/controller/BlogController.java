@@ -47,10 +47,17 @@ public class BlogController {
 
     @PutMapping("/like/{id}")
     public Result likeBlog(@PathVariable("id") Long id) {
-        // 修改点赞数量
-        blogService.update()
-                .setSql("liked = liked + 1").eq("id", id).update();
-        return Result.ok();
+        return blogService.likeBlog(id);
+    }
+
+    @GetMapping("/{id}")
+    public Result queryBlogById(@PathVariable("id") Long id) {
+        return blogService.queryBlogById(id);
+    }
+
+    @GetMapping("/likes/{id}")
+    public Result queryBlogLikes(@PathVariable("id") Long id) {
+        return blogService.queryBlogLikes(id);
     }
 
     @GetMapping("/of/me")
@@ -80,6 +87,7 @@ public class BlogController {
                 .collect(Collectors.toList());
         // 空列表直接返回，避免 in () 语法错误
         if (userIds.isEmpty()) {
+            blogService.fillLikeStatus(records);
             return Result.ok(records);
         }
         // 一次 IN 查询拿回所有作者，组装成 id -> User 的 Map
@@ -93,6 +101,7 @@ public class BlogController {
                 blog.setIcon(user.getIcon());
             }
         }
+        blogService.fillLikeStatus(records);
         return Result.ok(records);
     }
 }
