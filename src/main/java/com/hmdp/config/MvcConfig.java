@@ -25,6 +25,12 @@ public class MvcConfig implements WebMvcConfigurer {
                         "/user/code",
                         "/user/login",
                         "/blog/hot",
+                        // /blog/* 只放行笔记详情。点赞 /blog/like/*、我的笔记 /blog/of/me、
+                        // 修改和删除 /blog/me/* 仍要登录。
+                        "/blog/*",
+                        "/blog/likes/*",
+                        // 评论可以看。发表和删除不在这条路径里。
+                        "/blog-comments/of/**",
                         "/shop-type/**",
                         "/shop/*",
                         "/shop/of/*",

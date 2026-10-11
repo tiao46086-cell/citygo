@@ -1,16 +1,22 @@
 package com.hmdp.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.Blog;
+import com.hmdp.entity.BlogComments;
+import com.hmdp.entity.BlogFavorite;
 import com.hmdp.entity.User;
+import com.hmdp.mapper.BlogCommentsMapper;
+import com.hmdp.mapper.BlogFavoriteMapper;
 import com.hmdp.mapper.BlogMapper;
 import com.hmdp.service.IBlogService;
 import com.hmdp.service.IUserService;
 import com.hmdp.utils.UserHolder;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
 import java.util.ArrayList;
@@ -40,6 +46,12 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
 
     @Resource
     private IUserService userService;
+
+    @Resource
+    private BlogCommentsMapper blogCommentsMapper;
+
+    @Resource
+    private BlogFavoriteMapper blogFavoriteMapper;
 
     @Override
     public Result likeBlog(Long id) {
@@ -133,5 +145,53 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
                     .score(BLOG_LIKED_KEY + blog.getId(), user.getId().toString());
             blog.setIsLike(score != null);
         }
+    }
+
+    @Override
+    public Result updateOwn(Long id, Blog incoming) {
+        UserDTO user = UserHolder.getUser();
+        if (user == null || user.getId() == null) {
+            return Result.fail("请先登录");
+        }
+        Blog blog = id == null ? null : getById(id);
+        if (blog == null) {
+            return Result.fail("笔记不存在");
+        }
+        if (!user.getId().equals(blog.getUserId())) {
+            return Result.fail("无权限");
+        }
+        boolean updated = update()
+                .set("title", incoming.getTitle())
+                .set("content", incoming.getContent())
+                .set("shop_id", incoming.getShopId())
+                .set("images", incoming.getImages() == null ? "" : incoming.getImages())
+                .eq("id", id)
+                .eq("user_id", user.getId())
+                .update();
+        if (!updated) {
+            return Result.fail("笔记不存在");
+        }
+        return Result.ok();
+    }
+
+    @Override
+    @Transactional
+    public Result deleteOwn(Long id) {
+        UserDTO user = UserHolder.getUser();
+        if (user == null || user.getId() == null) {
+            return Result.fail("请先登录");
+        }
+        Blog blog = id == null ? null : getById(id);
+        if (blog == null) {
+            return Result.fail("笔记不存在");
+        }
+        if (!user.getId().equals(blog.getUserId())) {
+            return Result.fail("无权限");
+        }
+        blogCommentsMapper.delete(new QueryWrapper<BlogComments>().eq("blog_id", id));
+        blogFavoriteMapper.delete(new QueryWrapper<BlogFavorite>().eq("blog_id", id));
+        removeById(id);
+        stringRedisTemplate.delete(BLOG_LIKED_KEY + id);
+        return Result.ok();
     }
 }

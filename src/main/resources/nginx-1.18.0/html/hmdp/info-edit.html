@@ -1,135 +1,168 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
   <title>CityGo</title>
-  <!-- 引入样式 -->
   <link rel="stylesheet" href="./css/element.css">
-  <link href="./css/main.css" rel="stylesheet">
-  <link href="./css/info.css" rel="stylesheet">
-
-  <style type="text/css">
-
+  <link href="./css/main.css?v=4" rel="stylesheet">
+  <link href="./css/citygo.css?v=4" rel="stylesheet">
+  <style>
+    .cg-info-card {
+      background: var(--cg-card);
+      border-radius: var(--cg-radius);
+      box-shadow: var(--cg-shadow);
+      padding: 4px 16px;
+    }
+    .cg-info-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--cg-line);
+      font-size: 14px;
+    }
+    .cg-info-row:last-child {
+      border-bottom: 0;
+    }
+    .cg-info-label {
+      flex-shrink: 0;
+      color: var(--cg-text);
+      font-weight: 700;
+    }
+    .cg-info-value {
+      color: var(--cg-muted);
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+    .cg-info-avatar {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      object-fit: cover;
+      background: #E6EBEF;
+    }
+    .cg-info-note {
+      margin: 0 0 12px;
+      color: var(--cg-muted);
+      font-size: 13px;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
-<div id="app">
-  <div class="header">
-    <div class="header-back-btn" @click="goBack" ><i class="el-icon-arrow-left"></i></div>
-    <div class="header-title">资料编辑&nbsp;&nbsp;&nbsp;</div>
-  </div>
-  <div class="edit-container">
-    <div class="info-box">
-      <div class="info-item">
-        <div class="info-label">头像</div>
-        <div class="info-btn">
-          <img width="35" :src="user.icon || '/imgs/icons/default-icon.png'" alt="">
-          <div><i class="el-icon-arrow-right"></i></div>
-        </div>
+<div id="app" class="cg-wide">
+  <header class="cg-bar">
+    <button class="cg-btn-ghost" type="button" @click="goBack">返回</button>
+    <div class="cg-bar-title">资料</div>
+    <button class="cg-btn-ghost" type="button" style="visibility: hidden;">返回</button>
+  </header>
+  <main class="cg-main">
+    <p class="cg-info-note">资料暂不能修改</p>
+    <div v-if="state === 'loading'" class="hint">资料加载中</div>
+    <div v-else-if="state === 'error'" class="hint">资料加载失败</div>
+    <div v-else class="cg-info-card">
+      <div class="cg-info-row">
+        <div class="cg-info-label">头像</div>
+        <img class="cg-info-avatar" :src="user.icon || '/imgs/icons/default-icon.png?v=4'" @error="onImgError" alt="">
       </div>
-      <div class="divider"></div>
-      <div class="info-item">
-        <div class="info-label">昵称</div>
-        <div class="info-btn">
-          <div>{{user.nickName}}</div>
-          <div>
-            <i class="el-icon-arrow-right"></i>
-          </div>
-        </div>
+      <div class="cg-info-row">
+        <div class="cg-info-label">昵称</div>
+        <div class="cg-info-value">{{ user.nickName || "未填写" }}</div>
       </div>
-      <div class="divider"></div>
-      <div class="info-item">
-        <div class="info-label">个人介绍</div>
-        <div class="info-btn">
-          <div style="overflow: hidden; width: 150px;text-align: right">{{info.introduce || '介绍一下自己'}}</div>
-          <div>
-            <i class="el-icon-arrow-right"></i>
-          </div>
-        </div>
+      <div class="cg-info-row">
+        <div class="cg-info-label">个人介绍</div>
+        <div class="cg-info-value">{{ info.introduce || "还没有简介" }}</div>
       </div>
-    </div>
-    <div class="info-box">
-      <div class="info-item">
-        <div class="info-label">性别</div>
-        <div class="info-btn">
-          <div>{{info.gender || '选择'}}</div>
-          <div><i class="el-icon-arrow-right"></i></div>
-        </div>
+      <div class="cg-info-row">
+        <div class="cg-info-label">性别</div>
+        <div class="cg-info-value">{{ genderText }}</div>
       </div>
-      <div class="divider"></div>
-      <div class="info-item">
-        <div class="info-label">城市</div>
-        <div class="info-btn">
-          <div>{{info.city || '选择'}}</div>
-          <div><i class="el-icon-arrow-right"></i></div>
-        </div>
+      <div class="cg-info-row">
+        <div class="cg-info-label">城市</div>
+        <div class="cg-info-value">{{ info.city || "未填写" }}</div>
       </div>
-      <div class="divider"></div>
-      <div class="info-item">
-        <div class="info-label">生日</div>
-        <div class="info-btn">
-          <div>{{info.birthday || '添加'}}</div>
-          <div><i class="el-icon-arrow-right"></i></div>
-        </div>
+      <div class="cg-info-row">
+        <div class="cg-info-label">生日</div>
+        <div class="cg-info-value">{{ birthdayText }}</div>
       </div>
     </div>
-
-    <div class="info-box">
-      <div class="info-item">
-        <div class="info-label">我的积分</div>
-        <div class="info-btn">
-          <div>查看积分</div>
-          <div><i class="el-icon-arrow-right"></i></div>
-        </div>
-      </div>
-      <div class="divider"></div>
-      <div class="info-item">
-        <div class="info-label">会员等级</div>
-        <div class="info-btn">
-          <div><a href="javascript:void(0)">成为VIP尊享特权</a></div>
-          <div><i class="el-icon-arrow-right"></i></div>
-        </div>
-      </div>
-    </div>
-  </div>
-  <foot-bar :active-btn="4"></foot-bar>
+  </main>
 </div>
 <script src="./js/vue.js"></script>
 <script src="./js/axios.min.js"></script>
-<!-- 引入组件库 -->
 <script src="./js/element.js"></script>
-<script src="./js/common.js"></script>
-<script src="./js/footer.js"></script>
+<script src="./js/common.js?v=4"></script>
 <script>
-
   const app = new Vue({
     el: "#app",
     data: {
-      user: "",
+      user: {},
       info: {},
+      state: "loading"
     },
-    created() {
-      this.checkLogin();
-    },
-    methods: {
-      checkLogin() {
-        // 查询用户信息
-        axios.get("/user/me")
-        .then(({data}) => {
-          this.user = data;
-          this.info = JSON.parse(sessionStorage.getItem("userInfo")) || {}
-        })
-        .catch(err => {
-          this.$message.error(err);
-          setTimeout(() => location.href = "login.html", 1000)
-        })
+    computed: {
+      genderText() {
+        let gender = this.info.gender;
+        if (gender === true || gender === 1 || gender === "1") {
+          return "女";
+        }
+        if (gender === false || gender === 0 || gender === "0") {
+          return "男";
+        }
+        return "未填写";
       },
-      goBack(){
-        history.back();
+      birthdayText() {
+        let birthday = this.info.birthday;
+        if (!birthday) {
+          return "未填写";
+        }
+        if (Array.isArray(birthday)) {
+          return birthday.join("-");
+        }
+        return String(birthday);
       }
     },
-
+    created() {
+      this.load();
+    },
+    methods: {
+      load() {
+        if (!sessionStorage.getItem("token")) {
+          location.href = "/login.html";
+          return;
+        }
+        axios.get("/user/me")
+          .then(({data}) => {
+            this.user = data || {};
+            this.info = this.readLocalInfo();
+            this.state = "ok";
+          })
+          .catch(err => {
+            this.state = "error";
+            this.$message.error(err);
+            setTimeout(() => location.href = "/login.html", 1000);
+          })
+      },
+      readLocalInfo() {
+        try {
+          return JSON.parse(sessionStorage.getItem("userInfo")) || {};
+        } catch (e) {
+          return {};
+        }
+      },
+      onImgError(e) {
+        if (e.target.dataset.fallback) {
+          return;
+        }
+        e.target.dataset.fallback = "1";
+        e.target.src = "/imgs/icons/default-icon.png?v=4";
+      },
+      goBack() {
+        history.back();
+      }
+    }
   })
 </script>
 </body>

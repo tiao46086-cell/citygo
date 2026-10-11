@@ -1,123 +1,335 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
   <title>CityGo</title>
-  <!-- 引入样式 -->
   <link rel="stylesheet" href="./css/element.css">
-  <link href="./css/main.css" rel="stylesheet">
-  <link href="./css/blog-edit.css" rel="stylesheet">
-
-  <style type="text/css">
-
+  <link href="./css/main.css?v=4" rel="stylesheet">
+  <link href="./css/citygo.css?v=4" rel="stylesheet">
+  <style>
+    .cg-edit {
+      background: var(--cg-card);
+      border-radius: var(--cg-radius);
+      box-shadow: var(--cg-shadow);
+      padding: 16px;
+    }
+    .cg-upload-row {
+      display: flex;
+      gap: 10px;
+      overflow-x: auto;
+    }
+    .cg-upload {
+      width: 88px;
+      height: 88px;
+      flex-shrink: 0;
+      border: 1px dashed var(--cg-primary);
+      border-radius: var(--cg-btn-radius);
+      background: #fff;
+      color: var(--cg-primary);
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      font-size: 12px;
+    }
+    .cg-upload i {
+      font-size: 22px;
+    }
+    .cg-pic {
+      position: relative;
+      width: 88px;
+      height: 88px;
+      flex-shrink: 0;
+    }
+    .cg-pic img {
+      width: 88px;
+      height: 88px;
+      object-fit: cover;
+      border-radius: var(--cg-btn-radius);
+      background: #E6EBEF;
+    }
+    .cg-pic-del {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      width: 22px;
+      height: 22px;
+      border: 0;
+      border-radius: 50%;
+      background: rgba(31, 41, 55, 0.72);
+      color: #fff;
+      cursor: pointer;
+      line-height: 22px;
+      padding: 0;
+    }
+    .cg-edit-title,
+    .cg-edit-body,
+    .cg-shop-search input {
+      width: 100%;
+      box-sizing: border-box;
+      border: 0;
+      background: transparent;
+      color: var(--cg-text);
+      font-family: inherit;
+    }
+    .cg-edit-title {
+      margin-top: 16px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--cg-line);
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .cg-edit-body {
+      min-height: 180px;
+      padding: 12px 0;
+      resize: vertical;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+    .cg-edit-title:focus,
+    .cg-edit-body:focus,
+    .cg-shop-search input:focus {
+      outline: none;
+    }
+    .cg-shop-pick {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-top: 8px;
+      padding: 12px 0 4px;
+      border: 0;
+      border-top: 1px solid var(--cg-line);
+      background: transparent;
+      color: var(--cg-text);
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .cg-shop-pick span:last-child {
+      color: var(--cg-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .cg-mask {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      background: rgba(15, 23, 42, 0.35);
+    }
+    .cg-sheet {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 21;
+      max-height: 70%;
+      background: var(--cg-card);
+      border-radius: 16px 16px 0 0;
+      box-shadow: var(--cg-shadow);
+      display: flex;
+      flex-direction: column;
+      padding: 8px 16px 16px;
+    }
+    .cg-sheet-title {
+      text-align: center;
+      font-weight: 700;
+      padding: 8px 0 12px;
+    }
+    .cg-shop-search {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--cg-bg);
+      border-radius: var(--cg-btn-radius);
+      padding: 8px 12px;
+    }
+    .cg-shop-search i {
+      color: var(--cg-muted);
+      cursor: pointer;
+    }
+    .cg-shop-list {
+      overflow-y: auto;
+      margin-top: 8px;
+    }
+    .cg-shop-item {
+      width: 100%;
+      text-align: left;
+      border: 0;
+      border-bottom: 1px solid var(--cg-line);
+      background: transparent;
+      padding: 12px 0;
+      cursor: pointer;
+    }
+    .cg-shop-item strong {
+      display: block;
+      font-size: 14px;
+    }
+    .cg-shop-item span {
+      color: var(--cg-muted);
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
-<div id="app">
-  <div class="header">
-    <div class="header-cancel-btn" @click="goBack">取消</div>
-    <div class="header-title">&nbsp;&nbsp;发笔记<i class="el-icon-info"></i></div>
-    <div class="header-commit">
-      <div class="header-commit-btn" @click="submitBlog">发布</div>
-    </div>
-  </div>
-  <div class="upload-box">
-    <input type="file" @change="fileSelected" name="file" ref="fileInput" style="display: none">
-    <div class="upload-btn" @click="openFileDialog">
-      <i class="el-icon-camera"></i>
-      <div style="font-size: 12px;line-height: 12px">上传照片</div>
-    </div>
-    <div class="pic-list">
-      <div class="pic-box" v-for="(f,i) in fileList" :key="i">
-        <img :src="f" alt="">
-        <i class="el-icon-close" @click="deletePic(i)"></i>
-      </div>
-    </div>
-  </div>
-  <div class="blog-title">
-    <input v-model="params.title" type="text" placeholder="填写标题更容易上首页哦~">
-  </div>
-  <div class="blog-content">
-    <textarea v-model="params.content" placeholder="最近打卡了什么地方，有什么新奇体验呢？"></textarea>
-  </div>
-  <div class="divider"></div>
-  <div class="blog-shop" @click="showDialog=true">
-    <div class="shop-left">关联商户</div>
-    <div v-if="selectedShop.name">{{selectedShop.name}}</div>
-    <div v-else>去选择&nbsp;<i class="el-icon-arrow-right"></i></div>
-  </div>
-  <div class="mask" v-show="showDialog" @click="showDialog=false"></div>
-
-  <transition name="el-zoom-in-bottom">
-    <div class="shop-dialog" v-show="showDialog">
-      <div class="blog-shop">
-        <div class="shop-left">关联商户</div>
-      </div>
-      <div class="search-bar">
-        <div class="city-select">杭州 <i class="el-icon-arrow-down"></i></div>
-        <div class="search-input">
-          <i class="el-icon-search" @click="queryShops"></i>
-          <input v-model="shopName" type="text" placeholder="搜索商户名称">
+<div id="app" class="cg-wide">
+  <header class="cg-bar">
+    <button class="cg-btn-ghost" type="button" @click="goBack">取消</button>
+    <div class="cg-bar-title">{{ blogId ? "编辑笔记" : "发笔记" }}</div>
+    <button class="cg-btn" type="button" @click="submitBlog" :disabled="submitting">{{ submitting ? "保存中" : (blogId ? "保存" : "发布") }}</button>
+  </header>
+  <main class="cg-main">
+    <div class="cg-edit">
+      <div class="cg-upload-row">
+        <input type="file" @change="fileSelected" name="file" ref="fileInput" style="display: none">
+        <button class="cg-upload" type="button" @click="openFileDialog">
+          <i class="el-icon-camera"></i>
+          <span>上传照片</span>
+        </button>
+        <div class="cg-pic" v-for="(f, i) in fileList" :key="i">
+          <img :src="f" alt="">
+          <button class="cg-pic-del" type="button" @click="deletePic(i)">×</button>
         </div>
       </div>
-      <div class="shop-list">
-        <div v-for="s in shops" class="shop-item" @click="selectShop(s)">
-          <div class="shop-name">{{s.name}}</div>
-          <div>{{s.area}}</div>
-        </div>
-      </div>
+      <input class="cg-edit-title" v-model="params.title" type="text" placeholder="填写标题">
+      <textarea class="cg-edit-body" v-model="params.content" placeholder="写下商户、位置和体验。不要写真实联系方式。"></textarea>
+      <button class="cg-shop-pick" type="button" @click="showDialog = true">
+        <span>关联商户</span>
+        <span>{{ selectedShop.name || "去选择" }}</span>
+      </button>
     </div>
-  </transition>
+  </main>
+  <div class="cg-mask" v-show="showDialog" @click="showDialog = false"></div>
+  <div class="cg-sheet" v-show="showDialog">
+    <div class="cg-sheet-title">关联商户</div>
+    <div class="cg-shop-search">
+      <i class="el-icon-search" @click="queryShops"></i>
+      <input v-model="shopName" type="text" placeholder="搜索商户名称" @keyup.enter="queryShops">
+    </div>
+    <div class="cg-shop-list">
+      <div v-if="shopState === 'loading'" class="hint">商户加载中</div>
+      <div v-else-if="shopState === 'error'" class="hint">商户加载失败</div>
+      <div v-else-if="!shops.length" class="hint">没有找到商户</div>
+      <template v-else>
+        <button class="cg-shop-item" type="button" v-for="s in shops" :key="s.id" @click="selectShop(s)">
+          <strong>{{ s.name }}</strong>
+          <span>{{ s.area }}</span>
+        </button>
+      </template>
+    </div>
+  </div>
 </div>
 <script src="./js/vue.js"></script>
 <script src="./js/axios.min.js"></script>
-<!-- 引入组件库 -->
 <script src="./js/element.js"></script>
-<script src="./js/common.js"></script>
-<script src="./js/footer.js"></script>
+<script src="./js/common.js?v=4"></script>
 <script>
-
   const app = new Vue({
     el: "#app",
     data() {
       return {
-        util,
-        fileList: [], // 文件列表
+        fileList: [],
         params: {},
-        showDialog: false, //
-        shops: [], // 商户信息
-        shopName: "", //商户名称
-        selectedShop: {}, // 选中的商户
+        showDialog: false,
+        shops: [],
+        shopState: "loading",
+        shopName: "",
+        selectedShop: {},
+        submitting: false,
+        blogId: ""
       }
     },
     created() {
+      this.blogId = util.getUrlParam("id");
       this.checkLogin();
       this.queryShops();
+      if (this.blogId) {
+        this.loadBlog();
+      }
     },
     methods: {
       queryShops() {
-        axios.get("/shop/of/name?name=" + this.shopName)
-          .then(({data}) => this.shops = data)
-          .catch(this.$message.error)
+        this.shopState = "loading";
+        axios.get("/shop/of/name?name=" + encodeURIComponent(this.shopName || ""))
+          .then(({data}) => {
+            this.shops = data || [];
+            this.shopState = "ok";
+          })
+          .catch(err => {
+            this.shopState = "error";
+            this.$message.error(err);
+          })
       },
       selectShop(s) {
         this.selectedShop = s;
         this.showDialog = false;
       },
+      loadBlog() {
+        axios.get("/user/me")
+          .then(({data: me}) => axios.get("/blog/" + this.blogId).then(({data}) => ({ me, data })))
+          .then(({me, data}) => {
+            if (!data || !me || String(data.userId) !== String(me.id)) {
+              this.$message.error("无权限");
+              setTimeout(() => { location.href = "/info.html"; }, 200);
+              return;
+            }
+            this.params = { title: data.title || "", content: data.content || "" };
+            this.fileList = data.images ? String(data.images).split(",").filter(Boolean) : [];
+            if (!data.shopId) {
+              return;
+            }
+            axios.get("/shop/" + data.shopId)
+              .then(({data: shop}) => {
+                if (shop) {
+                  this.selectedShop = { id: shop.id, name: shop.name };
+                }
+              })
+              .catch(err => this.$message.error(err));
+          })
+          .catch(err => this.$message.error(err));
+      },
       submitBlog() {
-        let {...data} = this.params;
+        if (this.submitting) {
+          return;
+        }
+        if (!this.params.title || !String(this.params.title).trim()) {
+          this.$message.error("请填写标题");
+          return;
+        }
+        if (!this.params.content || !String(this.params.content).trim()) {
+          this.$message.error("请填写正文");
+          return;
+        }
+        if (!this.selectedShop || !this.selectedShop.id) {
+          this.$message.error("请选择商户");
+          return;
+        }
+        this.submitting = true;
+        let data = Object.assign({}, this.params);
         data.images = this.fileList.join(",");
         data.shopId = this.selectedShop.id;
-        axios.post("/blog", data)
-          .then(resp => location.href = "/info.html")
-          .catch(this.$message.error)
+        let request = this.blogId
+          ? axios.put("/blog/me/" + this.blogId, data)
+          : axios.post("/blog", data);
+        request
+          .then(() => location.href = "/info.html")
+          .catch(err => {
+            this.submitting = false;
+            this.$message.error(err);
+          })
       },
       openFileDialog() {
         this.$refs.fileInput.click();
       },
       fileSelected() {
         let file = this.$refs.fileInput.files[0];
+        if (!file) {
+          return;
+        }
         let formData = new FormData();
         formData.append("file", file);
         const config = {
@@ -125,23 +337,27 @@
         };
         axios
           .post("/upload/blog", formData, config)
-          .then(({data}) => this.fileList.push('/imgs/' + data))
-          .catch(this.$message.error);
+          .then(({data}) => this.fileList.push("/imgs/" + data))
+          .catch(err => this.$message.error(err));
       },
       deletePic(i) {
         let shown = this.fileList[i];
         let name = shown.indexOf("/imgs/") === 0 ? shown.substring("/imgs/".length) : shown;
         axios.get("/upload/blog/delete?name=" + encodeURIComponent(name))
           .then(() => this.fileList.splice(i, 1))
-          .catch(this.$message.error)
+          .catch(err => {
+            if (err === "错误的文件名称") {
+              this.fileList.splice(i, 1);
+              return;
+            }
+            this.$message.error(err);
+          })
       },
       checkLogin() {
-        // 获取token
         let token = sessionStorage.getItem("token");
         if (!token) {
           location.href = "login.html"
         }
-        // 查询用户信息
         axios.get("/user/me")
           .then()
           .catch(err => {
@@ -151,12 +367,8 @@
       },
       goBack() {
         history.back();
-      },
-      handleRemove(file) {
-        console.log(file);
       }
-    },
-
+    }
   })
 </script>
 </body>

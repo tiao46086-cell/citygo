@@ -7,8 +7,8 @@
   <title>CityGo</title>
   <!-- 引入样式 -->
   <link rel="stylesheet" href="./css/element.css">
-  <link href="./css/main.css" rel="stylesheet">
-  <link href="./css/info.css" rel="stylesheet">
+  <link href="./css/main.css?v=2" rel="stylesheet">
+  <link href="./css/info.css?v=2" rel="stylesheet">
 
   <style type="text/css">
       .el-tabs--bottom .el-tabs__item.is-bottom:nth-child(2), .el-tabs--bottom .el-tabs__item.is-top:nth-child(2), .el-tabs--top .el-tabs__item.is-bottom:nth-child(2), .el-tabs--top .el-tabs__item.is-top:nth-child(2) {
@@ -35,11 +35,11 @@
   </div>
   <div class="basic">
     <div class="basic-icon">
-      <img :src="user.icon || '/imgs/icons/default-icon.png'" alt="">
+      <img :src="user.icon || '/imgs/icons/default-icon.png?v=4'" alt="">
     </div>
     <div class="basic-info">
       <div class="name">{{user.nickName}}</div>
-      <span>杭州</span>
+      <span>广州</span>
     </div>
     <div class="logout-btn" @click="follow" style="text-align: center">
       {{followed ? "取消关注" : "关注"}}
@@ -65,7 +65,7 @@
         <div>你们都关注了：</div>
         <div class="follow-info" v-for="u in commonFollows" :key="u.id">
           <div class="follow-info-icon" @click="toOtherInfo(u.id)">
-            <img :src="u.icon || '/imgs/icons/default-icon.png'" alt="">
+            <img :src="u.icon || '/imgs/icons/default-icon.png?v=4'" alt="">
           </div>
           <div class="follow-info-name">
             <div class="name">{{u.nickName}}</div>
@@ -83,8 +83,8 @@
 <script src="./js/axios.min.js"></script>
 <!-- 引入组件库 -->
 <script src="./js/element.js"></script>
-<script src="./js/common.js"></script>
-<script src="./js/footer.js"></script>
+<script src="./js/common.js?v=2"></script>
+<script src="./js/footer.js?v=2"></script>
 <script>
   const app = new Vue({
     el: "#app",

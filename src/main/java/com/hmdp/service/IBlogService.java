@@ -35,4 +35,14 @@ public interface IBlogService extends IService<Blog> {
      * 给这一页笔记填上当前用户是否点过赞。
      */
     void fillLikeStatus(List<Blog> blogs);
+
+    /**
+     * 只改自己的笔记。点赞数和评论数不动。
+     */
+    Result updateOwn(Long id, Blog blog);
+
+    /**
+     * 只删自己的笔记，同时删掉它的评论、收藏和点赞记录。
+     */
+    Result deleteOwn(Long id);
 }

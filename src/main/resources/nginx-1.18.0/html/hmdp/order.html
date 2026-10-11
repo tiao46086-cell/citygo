@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
+  <title>CityGo</title>
+  <link rel="stylesheet" href="./css/element.css">
+  <link href="./css/main.css?v=4" rel="stylesheet">
+  <link href="./css/citygo.css?v=4" rel="stylesheet">
+  <style>
+    .cg-order-wrap {
+      display: flex;
+      justify-content: center;
+      padding-top: 24px;
+    }
+    .cg-order-card {
+      box-sizing: border-box;
+      width: 100%;
+      max-width: 400px;
+      background: var(--cg-card);
+      border-radius: var(--cg-radius);
+      box-shadow: var(--cg-shadow);
+      padding: 20px 16px 16px;
+    }
+    .cg-order-lead {
+      margin: 0 0 16px;
+      color: var(--cg-muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .cg-order-submit {
+      width: 100%;
+      margin-top: 12px;
+      padding: 12px 14px;
+    }
+    .cg-order-result {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--cg-line);
+      font-size: 14px;
+      line-height: 1.8;
+      word-break: break-all;
+    }
+    .cg-order-note {
+      margin: 8px 0 0;
+      color: var(--cg-muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    #app .el-input__inner:focus {
+      border-color: var(--cg-primary);
+    }
+  </style>
+</head>
+<body>
+<div id="app" class="cg-wide">
+  <header class="cg-bar">
+    <button class="cg-btn-ghost" @click="goBack">返回</button>
+    <div class="cg-bar-title">订单查询</div>
+    <button class="cg-btn-ghost" style="visibility: hidden;">返回</button>
+  </header>
+  <main class="cg-main">
+    <div class="cg-order-wrap">
+      <div class="cg-order-card">
+        <p class="cg-order-lead">输入订单号查看状态。支付只修改订单状态，不接入支付宝或微信。</p>
+        <el-input v-model="orderId" placeholder="输入订单号" @keyup.enter.native="query"></el-input>
+        <button class="cg-btn cg-order-submit" type="button" @click="query" :disabled="loading">{{ loading ? "查询中" : "查询" }}</button>
+        <div v-if="loading" class="hint">查询中</div>
+        <div v-else-if="error" class="hint">{{error}}</div>
+        <div v-else-if="order" class="cg-order-result">
+          <div>订单号：{{order.orderId}}</div>
+          <div>状态：{{order.state}}</div>
+          <button v-if="order.state === '未支付'" class="cg-btn cg-order-submit" type="button" @click="pay" :disabled="paying">{{ paying ? "支付中" : "模拟支付" }}</button>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="./js/vue.js"></script>
+<script src="./js/axios.min.js"></script>
+<script src="./js/element.js"></script>
+<script src="./js/common.js?v=4"></script>
+<script>
+  const app = new Vue({
+    el: "#app",
+    data: {
+      orderId: "",
+      order: null,
+      error: "",
+      loading: false,
+      paying: false
+    },
+    created() {
+      if (!sessionStorage.getItem("token")) {
+        location.href = "/login.html";
+      }
+    },
+    methods: {
+      goBack() {
+        history.back();
+      },
+      query() {
+        if (this.loading) {
+          return;
+        }
+        let id = (this.orderId || "").trim();
+        if (!/^\d+$/.test(id)) {
+          this.$message.error("请输入订单号");
+          return;
+        }
+        this.loading = true;
+        this.order = null;
+        this.error = "";
+        axios.get("/voucher-order/" + id)
+          .then(({data}) => {
+            this.order = data;
+          })
+          .catch(err => {
+            this.error = typeof err === "string" ? err : "查询失败";
+          })
+          .then(() => {
+            this.loading = false;
+          });
+      },
+      pay() {
+        if (this.paying || !this.order || !this.order.orderId) {
+          return;
+        }
+        this.paying = true;
+        axios.post("/voucher-order/pay/" + this.order.orderId)
+          .then(() => {
+            this.$message.success("支付成功");
+            this.order.state = "已支付";
+          })
+          .catch(err => this.$message.error(err))
+          .then(() => {
+            this.paying = false;
+          });
+      }
+    }
+  });
+</script>
+</body>
+</html>

@@ -1,16 +1,29 @@
 -- 秒杀资格判断。Redis 单线程执行整段脚本，中间不会插入别的命令。
 -- KEYS[1] 库存，字符串，seckill:stock:{券id}
--- KEYS[2] 已抢到的用户，Set，seckill:order:{券id}
+-- KEYS[2] 旧的已购用户 Set，seckill:order:{券id}。只用来拦住这次改动之前已经抢到的人
 -- KEYS[3] 开始和结束时间，Hash，seckill:voucher:{券id}，字段 beginTime / endTime，单位是秒
--- ARGV[1] 用户 id
+-- KEYS[4] 当前预占，Hash，seckill:hold:{券id}，field 是用户 id，value 是订单号
 -- KEYS[5] 待确认，Hash，seckill:pending:{订单号}
 --   userId、voucherId、state=waiting、nextRetryAt（毫秒，到点才允许补发）
 -- ARGV[1] 用户 id
 -- ARGV[2] 订单号。调用前已经生成，这样预占能对上这一单
 -- ARGV[3] 券 id
 -- ARGV[4] 下次允许补发的时间，毫秒。缺省当作 0
+-- 返回：0 通过，1 库存不足，2 不能重复下单，3 尚未开始，4 已经结束，5 秒杀券不存在
+-- 取消成功后预占会被删掉，同一个人可以再抢。回补时必须带原来的订单号。
+
+local stockKey = KEYS[1]
+local legacyKey = KEYS[2]
 local voucherKey = KEYS[3]
+local holdKey = KEYS[4]
+local pendingKey = KEYS[5]
 local userId = ARGV[1]
+local orderId = ARGV[2]
+local voucherId = ARGV[3]
+local nextRetryAt = ARGV[4]
+if (nextRetryAt == nil or nextRetryAt == false or nextRetryAt == '') then
+    nextRetryAt = '0'
+end
 
 if (redis.call('exists', stockKey) == 0) then
     return 5
@@ -22,7 +35,6 @@ if (beginTime == false or endTime == false) then
     return 5
 end
 
--- time 返回 {当前秒, 微秒}，取第 1 个和券上的秒数比较
 local nowSecond = tonumber(redis.call('time')[1])
 if (nowSecond < tonumber(beginTime)) then
     return 3
@@ -34,10 +46,15 @@ end
 if (tonumber(redis.call('get', stockKey)) <= 0) then
     return 1
 end
-if (redis.call('sismember', orderKey, userId) == 1) then
+if (redis.call('sismember', legacyKey, userId) == 1 or redis.call('hexists', holdKey, userId) == 1) then
     return 2
 end
 
 redis.call('incrby', stockKey, -1)
-redis.call('sadd', orderKey, userId)
+redis.call('hset', holdKey, userId, orderId)
+redis.call('hmset', pendingKey,
+        'userId', userId,
+        'voucherId', voucherId,
+        'state', 'waiting',
+        'nextRetryAt', nextRetryAt)
 return 0

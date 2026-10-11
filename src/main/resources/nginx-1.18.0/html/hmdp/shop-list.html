@@ -1,162 +1,132 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
   <title>CityGo</title>
-  <!-- 引入样式 -->
   <link rel="stylesheet" href="./css/element.css">
-
-  <link href="./css/shop-list.css" rel="stylesheet">
-  <link href="./css/main.css" rel="stylesheet">
-
-  <style type="text/css">
-
-  </style>
+  <link href="./css/main.css?v=4" rel="stylesheet">
+  <link href="./css/citygo.css?v=4" rel="stylesheet">
 </head>
 <body>
-<div id="app">
-  <div class="header">
-    <div class="header-back-btn" @click="goBack"><i class="el-icon-arrow-left"></i></div>
-    <div class="header-title">{{typeName}}</div>
-    <div class="header-search">
-      <i class="el-icon-search"></i>
+<div id="app" class="cg-wide">
+  <header class="cg-bar">
+    <button class="cg-btn-ghost" @click="goBack">返回</button>
+    <div class="cg-bar-title">{{pageTitle}}</div>
+    <button class="cg-btn-ghost" style="visibility: hidden;">返回</button>
+  </header>
+  <main class="cg-main" @scroll="onScroll">
+    <div class="cg-pills" v-if="!keyword && types.length">
+      <div class="cg-pill" :class="{on: String(t.id) === String(params.typeId)}" v-for="t in types" :key="t.id" @click="handleCommand(t)">{{t.name}}</div>
     </div>
-  </div>
-  <div class="sort-bar">
-    <div class="sort-item">
-      <el-dropdown trigger="click" @command="handleCommand">
-      <span class="el-dropdown-link">
-        {{typeName}}<i class="el-icon-arrow-down el-icon--right"></i>
-      </span>
-        <el-dropdown-menu slot="dropdown">
-          <el-dropdown-item v-for="t in types" :key="t.id" :command="t">
-            {{t.name}}
-          </el-dropdown-item>
-        </el-dropdown-menu>
-      </el-dropdown>
-    </div>
-    <div class="sort-item" @click="sortAndQuery('')">
-      距离 <i class="el-icon-arrow-down el-icon--right"></i>
-    </div>
-    <div class="sort-item" @click="sortAndQuery('comments')">
-      人气 <i class="el-icon-arrow-down el-icon--right"></i>
-    </div>
-    <div class="sort-item" @click="sortAndQuery('score')">
-      评分 <i class="el-icon-arrow-down el-icon--right"></i>
-    </div>
-  </div>
-  <div class="shop-list" @scroll="onScroll">
-    <div class="shop-box" v-for="s in shops" :key="s.id" @click="toDetail(s.id)">
-      <div class="shop-img"><img :src="s.images" alt=""></div>
-      <div class="shop-info">
-        <div class="shop-title shop-item">{{s.name}}</div>
-        <div class="shop-rate shop-item" >
-          <el-rate
-              disabled v-model="s.score/10"
-              text-color="#F63"
-              show-score
-          ></el-rate>
-          <span>{{s.comments}}条</span>
+    <div v-if="listState === 'loading'" class="hint">商户加载中</div>
+    <div v-else-if="listState === 'error'" class="hint">商户加载失败</div>
+    <div v-else-if="shops.length === 0" class="hint">没有找到商户</div>
+    <div v-else class="cg-shops">
+      <article class="cg-card cg-shop-card" v-for="s in shops" :key="s.id" @click="toDetail(s.id)">
+        <img class="cg-cover" :src="s.cover" alt="" @error="onImgError">
+        <div>
+          <div class="cg-shop-name">{{s.name}}</div>
+          <div class="cg-meta">{{s.area}}</div>
+          <div class="cg-meta">人均 ¥{{s.avgPrice || "-"}}</div>
+          <div class="cg-meta">{{s.address}}</div>
         </div>
-        <div class="shop-area shop-item">
-          <span>{{s.area}}</span>
-          <span v-if="s.distance">{{s.distance < 1000 ? s.distance.toFixed(1) + 'm' : (s.distance/1000).toFixed(1) + 'km'}}</span>
-        </div>
-        <div class="shop-avg shop-item">￥{{s.avgPrice}}/人</div>
-        <div class="shop-address shop-item">
-          <i class="el-icon-map-location"></i>
-          <span>{{s.address}}</span>
-        </div>
-      </div>
+      </article>
     </div>
-  </div>
+    <p class="cg-note">学习项目，商户及交易数据仅供演示</p>
+  </main>
 </div>
 <script src="./js/vue.js"></script>
 <script src="./js/axios.min.js"></script>
-<!-- 引入组件库 -->
 <script src="./js/element.js"></script>
-<script src="./js/common.js"></script>
+<script src="./js/common.js?v=4"></script>
 <script>
-
   const app = new Vue({
     el: "#app",
     data: {
       util,
       isReachBottom: false,
-      types: [], // 类型列表
-      shops: [], // 商店列表
+      types: [],
+      shops: [],
       typeName: "",
-      params:{
+      keyword: "",
+      listState: "loading",
+      params: {
         typeId: 0,
-        current: 1,
-        sortBy: "",
-        x: 120.149993, // 经度
-        y: 30.334229 // 纬度
+        current: 1
+      },
+      placeholder: "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="100%" height="100%" fill="#E6EBEF"/><text x="50%" y="50%" fill="#6B7280" font-size="28" text-anchor="middle" dominant-baseline="middle">CityGo</text></svg>'
+      )
+    },
+    computed: {
+      pageTitle() {
+        return this.keyword ? this.keyword : this.typeName;
       }
     },
     created() {
-      // 获取参数
+      this.keyword = util.getUrlParam("keyword");
       this.params.typeId = util.getUrlParam("type");
-      this.typeName = util.getUrlParam("name");
-      // 查询类型
-      this.queryTypes();
-      // 查询商店
+      this.typeName = util.getUrlParam("name") || "商户";
+      if (!this.keyword) {
+        this.queryTypes();
+      }
       this.queryShops();
     },
     methods: {
       queryTypes() {
         axios.get("/shop-type/list")
           .then(({data}) => {
-            this.types = data;
+            this.types = data || [];
           })
-          .catch(err => {
-            console.log(err);
-            this.$message.error(err)
-          })
+          .catch(err => this.$message.error(err))
       },
       queryShops() {
-        axios.get("/shop/of/type", {
-            params: this.params
-          })
+        let request = this.keyword
+          ? axios.get("/shop/of/name", { params: { name: this.keyword, current: this.params.current } })
+          : axios.get("/shop/of/type", { params: { typeId: this.params.typeId, current: this.params.current } });
+        request
           .then(({data}) => {
-            if (!data) {
-              return
-            }
-            data.forEach(s => s.images = s.images.split(',')[0]);
-            this.shops = this.shops.concat(data);
+            let rows = data || [];
+            rows.forEach(s => s.cover = s.images ? s.images.split(",").filter(Boolean)[0] : "");
+            this.shops = this.shops.concat(rows);
+            this.listState = "ok";
           })
           .catch(err => {
-            console.log(err);
-            this.$message.error(err)
+            if (this.shops.length === 0) {
+              this.listState = "error";
+            }
+            this.$message.error(err);
           })
       },
       handleCommand(t) {
-        location.href = "/shop-list.html?type="+t.id+"&name="+t.name;
-      },
-      sortAndQuery(sortBy) {
-        this.params.sortBy = sortBy;
-        this.queryShops();
+        location.href = "/shop-list.html?type=" + t.id + "&name=" + t.name;
       },
       goBack() {
         history.back();
       },
       toDetail(id) {
-        location.href = "/shop-detail.html?id="+id
+        location.href = "/shop-detail.html?id=" + id;
+      },
+      onImgError(e) {
+        if (e.target.dataset.fallback) {
+          return;
+        }
+        e.target.dataset.fallback = "1";
+        e.target.src = this.placeholder;
       },
       onScroll(e) {
         let scrollTop = e.target.scrollTop;
         let offsetHeight = e.target.offsetHeight;
         let scrollHeight = e.target.scrollHeight;
-        if(scrollTop + offsetHeight + 1 > scrollHeight && !this.isReachBottom){
-          this.isReachBottom = true
-          console.log("触底")
-          this.params.current++
-          this.queryShops(this.params.current, 5);
-        }else{
-          this.isReachBottom = false
+        if (scrollTop + offsetHeight + 40 > scrollHeight && !this.isReachBottom) {
+          this.isReachBottom = true;
+          this.params.current++;
+          this.queryShops();
+        } else {
+          this.isReachBottom = false;
         }
-      },
+      }
     }
   })
 </script>

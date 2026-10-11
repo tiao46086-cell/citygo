@@ -7,6 +7,7 @@ import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.Blog;
 import com.hmdp.entity.User;
 import com.hmdp.service.IBlogService;
+import com.hmdp.service.IShopService;
 import com.hmdp.service.IUserService;
 import com.hmdp.utils.SystemConstants;
 import com.hmdp.utils.UserHolder;
@@ -29,20 +30,50 @@ import java.util.stream.Collectors;
 @RequestMapping("/blog")
 public class BlogController {
 
+    private static final int TITLE_LIMIT = 255;
+    private static final int CONTENT_LIMIT = 2048;
+    private static final int IMAGES_LIMIT = 2048;
+
     @Resource
     private IBlogService blogService;
+    @Resource
+    private IShopService shopService;
     @Resource
     private IUserService userService;
 
     @PostMapping
     public Result saveBlog(@RequestBody Blog blog) {
-        // 获取登录用户
+        Result invalid = prepareBlog(blog);
+        if (invalid != null) {
+            return invalid;
+        }
         UserDTO user = UserHolder.getUser();
         blog.setUserId(user.getId());
-        // 保存探店博文
+        if (blog.getLiked() == null) {
+            blog.setLiked(0);
+        }
+        if (blog.getComments() == null) {
+            blog.setComments(0);
+        }
         blogService.save(blog);
-        // 返回id
         return Result.ok(blog.getId());
+    }
+
+    /**
+     * /blog/me/* 有两段，不会被「笔记详情免登录」放行。
+     */
+    @PutMapping("/me/{id}")
+    public Result updateMyBlog(@PathVariable("id") Long id, @RequestBody Blog blog) {
+        Result invalid = prepareBlog(blog);
+        if (invalid != null) {
+            return invalid;
+        }
+        return blogService.updateOwn(id, blog);
+    }
+
+    @DeleteMapping("/me/{id}")
+    public Result deleteMyBlog(@PathVariable("id") Long id) {
+        return blogService.deleteOwn(id);
     }
 
     @PutMapping("/like/{id}")
@@ -103,5 +134,42 @@ public class BlogController {
         }
         blogService.fillLikeStatus(records);
         return Result.ok(records);
+    }
+
+    /**
+     * 通过时把标题、正文、图片整理好并返回 null。不通过时返回失败结果。
+     */
+    private Result prepareBlog(Blog blog) {
+        if (blog == null) {
+            return Result.fail("笔记不能为空");
+        }
+        String title = blog.getTitle() == null ? "" : blog.getTitle().trim();
+        String content = blog.getContent() == null ? "" : blog.getContent().trim();
+        if (title.isEmpty()) {
+            return Result.fail("请填写标题");
+        }
+        if (title.length() > TITLE_LIMIT) {
+            return Result.fail("标题太长");
+        }
+        if (content.isEmpty()) {
+            return Result.fail("请填写正文");
+        }
+        if (content.length() > CONTENT_LIMIT) {
+            return Result.fail("正文太长");
+        }
+        if (blog.getShopId() == null) {
+            return Result.fail("请选择商户");
+        }
+        if (shopService.getById(blog.getShopId()) == null) {
+            return Result.fail("商户不存在");
+        }
+        String images = blog.getImages() == null ? "" : blog.getImages().trim();
+        if (images.length() > IMAGES_LIMIT) {
+            return Result.fail("图片太多");
+        }
+        blog.setTitle(title);
+        blog.setContent(content);
+        blog.setImages(images);
+        return null;
     }
 }
