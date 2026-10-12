@@ -52,7 +52,7 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
     Result payOrder(Long orderId);
 
     /**
-     * 消费者调用：按订单号幂等写入。库存扣失败时回滚这一单的 Redis 预占
+     * 消费者调用：和终止抢同一行订单。只有把状态从 0 改成未支付才扣库存。已经终止的订单号不会再建单。
      * @param message 队列里的订单号、用户 id、优惠券 id
      * @return 监听器据此应答，或在抛异常时进入有限次重试
      */
@@ -73,8 +73,8 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
     boolean releaseDemoOrders(Long userId);
 
     /**
-     * 下单消息次数用完仍没有订单时，退回 Redis 库存和购买资格，并记下失败状态。
-     * 库里已经有这一单时只去掉预占，不再加库存。
+     * 和创建抢同一行。条件更新成失败状态后才退回 Redis。已经是未支付订单时只去掉预占。
+     * 失败状态留在库里，相同消息再投递不能再建单或扣库存。
      * @return false 表示 Redis 没写成功，调用方不要应答原消息
      */
     boolean abandonFailedCreate(Long orderId, Long userId, Long voucherId);

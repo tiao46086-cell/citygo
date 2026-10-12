@@ -48,7 +48,7 @@ public class VoucherOrder implements Serializable {
     private Integer payType;
 
     /**
-     * 订单状态，1：未支付；2：已支付；3：已核销；4：已取消；5：退款中；6：已退款
+     * 订单状态，0：创建和终止还在抢；1：未支付；2：已支付；3：已核销；4：已取消；5：退款中；6：已退款；7：下单失败
      */
     private Integer status;
 

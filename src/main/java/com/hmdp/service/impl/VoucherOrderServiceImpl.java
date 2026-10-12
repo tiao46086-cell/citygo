@@ -31,7 +31,6 @@ import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.connection.DataType;
 import org.springframework.data.redis.core.Cursor;
@@ -95,10 +94,12 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private static final int SECKILL_LIMIT_SECONDS = 1;
     /** 等待 broker 确认的时间。超时只能说明确认没回来，消息仍可能已经进队列 */
     private static final long CONFIRM_WAIT_SECONDS = 3L;
-    /** 与 tb_voucher_order.status 的约定一致：1 未支付，2 已支付，4 已取消 */
+    /** 0 还没分出结果；1 未支付；2 已支付；4 已取消；7 下单失败，不能再变成未支付 */
+    private static final int ORDER_STATUS_OPEN = 0;
     private static final int ORDER_STATUS_UNPAID = 1;
     private static final int ORDER_STATUS_PAID = 2;
     private static final int ORDER_STATUS_CANCELLED = 4;
+    private static final int ORDER_STATUS_FAILED = 7;
     /** 与 tb_voucher.type 的约定一致：0 普通券，1 秒杀券 */
     private static final int VOUCHER_TYPE_NORMAL = 0;
     private static final int VOUCHER_TYPE_SECKILL = 1;
@@ -298,6 +299,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         Page<VoucherOrder> page = query()
                 .eq("user_id", userId)
                 .gt(after != null, "id", after == null ? 0L : after)
+                .notIn("status", ORDER_STATUS_OPEN, ORDER_STATUS_FAILED)
                 .orderByDesc("create_time")
                 .orderByDesc("id")
                 .page(new Page<>(pageNo, SystemConstants.MAX_PAGE_SIZE));
@@ -351,21 +353,17 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             log.error("秒杀订单消息不完整: {}", message);
             return VoucherOrderCreateStatus.INVALID;
         }
-        if (getById(message.getOrderId()) != null) {
-            log.info("秒杀订单已存在, orderId={}", message.getOrderId());
+        // 先占订单号，再把 status 从 0 改成未支付。改不到说明终止或另一条消息已经赢了，不能扣库存
+        getBaseMapper().insertUnclaimed(message.getOrderId(), message.getUserId(), message.getVoucherId());
+        int claimed = getBaseMapper().claim(message.getOrderId(), ORDER_STATUS_UNPAID);
+        if (claimed != 1) {
             deletePendingAfterCommit(message.getOrderId());
-            return VoucherOrderCreateStatus.EXISTS;
-        }
-        // 先插入订单。主键冲突说明另一条相同消息已经在写，这次不能再扣库存
-        VoucherOrder voucherOrder = new VoucherOrder();
-        voucherOrder.setId(message.getOrderId());
-        voucherOrder.setUserId(message.getUserId());
-        voucherOrder.setVoucherId(message.getVoucherId());
-        try {
-            save(voucherOrder);
-        } catch (DuplicateKeyException e) {
+            VoucherOrder existing = getById(message.getOrderId());
+            if (existing != null && existing.getStatus() != null && existing.getStatus() == ORDER_STATUS_FAILED) {
+                log.info("秒杀订单已终止, orderId={}", message.getOrderId());
+                return VoucherOrderCreateStatus.TERMINATED;
+            }
             log.info("秒杀订单已存在, orderId={}", message.getOrderId());
-            deletePendingAfterCommit(message.getOrderId());
             return VoucherOrderCreateStatus.EXISTS;
         }
         boolean success = seckillVoucherService.update()
@@ -405,6 +403,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
         VoucherOrder order = getById(orderId);
         if (order == null || !userId.equals(order.getUserId())) {
+            return Result.fail("订单不存在");
+        }
+        if (order.getStatus() != null && (order.getStatus() == ORDER_STATUS_FAILED || order.getStatus() == ORDER_STATUS_OPEN)) {
             return Result.fail("订单不存在");
         }
         if (order.getStatus() != null && order.getStatus() == ORDER_STATUS_PAID) {
@@ -464,6 +465,11 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
         List<VoucherOrder> orders = query().eq("user_id", userId).list();
         for (VoucherOrder order : orders) {
+            if (order.getStatus() != null && order.getStatus() == ORDER_STATUS_OPEN) {
+                return false;
+            }
+        }
+        for (VoucherOrder order : orders) {
             if (order.getStatus() != null && order.getStatus() == ORDER_STATUS_UNPAID) {
                 self.markOrderCancelled(order.getId());
                 self.restoreRedisIfCancelled(order.getId());
@@ -487,7 +493,13 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if (orderId == null || userId == null || voucherId == null) {
             return true;
         }
-        if (getById(orderId) != null) {
+        getBaseMapper().insertUnclaimed(orderId, userId, voucherId);
+        getBaseMapper().claim(orderId, ORDER_STATUS_FAILED);
+        VoucherOrder order = getById(orderId);
+        if (order == null || order.getStatus() == null || order.getStatus() == ORDER_STATUS_OPEN) {
+            return false;
+        }
+        if (order.getStatus() != ORDER_STATUS_FAILED) {
             stringRedisTemplate.delete(SECKILL_PENDING_KEY + orderId);
             return true;
         }
@@ -702,6 +714,12 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     private String orderState(VoucherOrder order, Set<Long> expiredIds) {
         Integer status = order.getStatus();
+        if (status != null && status == ORDER_STATUS_FAILED) {
+            return "下单失败";
+        }
+        if (status != null && status == ORDER_STATUS_OPEN) {
+            return "处理中";
+        }
         if (status != null && status == ORDER_STATUS_PAID) {
             return "已支付";
         }

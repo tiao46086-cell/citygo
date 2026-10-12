@@ -8,6 +8,8 @@ public enum VoucherOrderCreateStatus {
     CREATED,
     /** 这个订单号已经存在，重复投递，不再插入 */
     EXISTS,
+    /** 这个订单号已经终止，不再创建，也不再扣库存 */
+    TERMINATED,
     /** 数据库库存不足，已把 Redis 里的库存和购买资格还回去 */
     STOCK_FAILED,
     /** 消息缺字段，应答后丢弃，避免反复入队 */

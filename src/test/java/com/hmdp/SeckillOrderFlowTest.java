@@ -243,6 +243,73 @@ public class SeckillOrderFlowTest {
         Assertions.assertEquals(Integer.valueOf(3), currentStock());
         Assertions.assertTrue(voucherOrderService.abandonFailedCreate(ORDER_ID, USER_ID, VOUCHER_ID));
         Assertions.assertEquals("2", stringRedisTemplate.opsForValue().get("seckill:stock:" + VOUCHER_ID));
+        stringRedisTemplate.delete("seckill:failed:" + ORDER_ID);
+        Result again = voucherOrderService.queryOrder(ORDER_ID);
+        Assertions.assertEquals("下单失败", ((VoucherOrderStatus) again.getData()).getState());
+        Assertions.assertEquals(VoucherOrderCreateStatus.TERMINATED, voucherOrderService.createVoucherOrder(message(ORDER_ID)));
+        Assertions.assertEquals(Integer.valueOf(3), currentStock());
+        Assertions.assertEquals(Integer.valueOf(7), voucherOrderService.getById(ORDER_ID).getStatus());
+        Assertions.assertEquals("2", stringRedisTemplate.opsForValue().get("seckill:stock:" + VOUCHER_ID));
+        Assertions.assertTrue(((List<?>) voucherOrderService.pageMine(1).getData()).isEmpty());
+        Assertions.assertEquals("订单不存在", voucherOrderService.payOrder(ORDER_ID).getErrorMsg());
+    }
+
+    @Test
+    public void createAndTerminateCannotBothSucceed() throws Exception {
+        prepareVoucher(3);
+        stringRedisTemplate.opsForHash().put("seckill:voucher:" + VOUCHER_ID, "beginTime", "1");
+        stringRedisTemplate.opsForHash().put("seckill:voucher:" + VOUCHER_ID, "endTime", "9999999999");
+        for (int i = 0; i < 8; i++) {
+            jdbcTemplate.update("DELETE FROM tb_voucher_order WHERE id = ?", ORDER_ID);
+            jdbcTemplate.update("UPDATE tb_seckill_voucher SET stock = 3 WHERE voucher_id = ?", VOUCHER_ID);
+            stringRedisTemplate.delete("seckill:stock:" + VOUCHER_ID);
+            stringRedisTemplate.delete("seckill:hold:" + VOUCHER_ID);
+            stringRedisTemplate.delete("seckill:pending:" + ORDER_ID);
+            stringRedisTemplate.delete("seckill:failed:" + ORDER_ID);
+            stringRedisTemplate.opsForValue().set("seckill:stock:" + VOUCHER_ID, "2");
+            Assertions.assertEquals(Long.valueOf(0), runSeckill(ORDER_ID));
+            String heldStock = stringRedisTemplate.opsForValue().get("seckill:stock:" + VOUCHER_ID);
+            CountDownLatch ready = new CountDownLatch(2);
+            CountDownLatch start = new CountDownLatch(1);
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            VoucherOrderCreateStatus createStatus;
+            try {
+                Future<VoucherOrderCreateStatus> created = pool.submit(() -> {
+                    ready.countDown();
+                    start.await();
+                    return voucherOrderService.createVoucherOrder(message(ORDER_ID));
+                });
+                Future<Boolean> terminated = pool.submit(() -> {
+                    ready.countDown();
+                    start.await();
+                    return voucherOrderService.abandonFailedCreate(ORDER_ID, USER_ID, VOUCHER_ID);
+                });
+                ready.await();
+                start.countDown();
+                createStatus = created.get();
+                Assertions.assertEquals(Boolean.TRUE, terminated.get());
+            } finally {
+                pool.shutdownNow();
+            }
+            VoucherOrder order = voucherOrderService.getById(ORDER_ID);
+            Assertions.assertNotNull(order);
+            if (Integer.valueOf(1).equals(order.getStatus())) {
+                Assertions.assertEquals(VoucherOrderCreateStatus.CREATED, createStatus);
+                Assertions.assertEquals(Integer.valueOf(2), currentStock());
+                Assertions.assertEquals(heldStock, stringRedisTemplate.opsForValue().get("seckill:stock:" + VOUCHER_ID));
+            } else {
+                Assertions.assertEquals(Integer.valueOf(7), order.getStatus());
+                Assertions.assertEquals(VoucherOrderCreateStatus.TERMINATED, createStatus);
+                Assertions.assertEquals(Integer.valueOf(3), currentStock());
+                Assertions.assertEquals("2", stringRedisTemplate.opsForValue().get("seckill:stock:" + VOUCHER_ID));
+            }
+            Integer stock = currentStock();
+            Integer status = order.getStatus();
+            voucherOrderService.createVoucherOrder(message(ORDER_ID));
+            Assertions.assertTrue(voucherOrderService.abandonFailedCreate(ORDER_ID, USER_ID, VOUCHER_ID));
+            Assertions.assertEquals(stock, currentStock());
+            Assertions.assertEquals(status, voucherOrderService.getById(ORDER_ID).getStatus());
+        }
     }
 
     @Test
