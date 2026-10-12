@@ -12,6 +12,7 @@ import com.hmdp.dto.VoucherOrderView;
 import com.hmdp.entity.Shop;
 import com.hmdp.entity.Voucher;
 import com.hmdp.entity.VoucherOrder;
+import com.hmdp.mapper.VoucherMapper;
 import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IShopService;
@@ -26,9 +27,12 @@ import org.springframework.amqp.AmqpConnectException;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.connection.DataType;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
@@ -91,6 +95,10 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private static final int ORDER_STATUS_UNPAID = 1;
     private static final int ORDER_STATUS_PAID = 2;
     private static final int ORDER_STATUS_CANCELLED = 4;
+    /** 与 tb_voucher.type 的约定一致：0 普通券，1 秒杀券 */
+    private static final int VOUCHER_TYPE_NORMAL = 0;
+    private static final int VOUCHER_TYPE_SECKILL = 1;
+    private static final int VOUCHER_STATUS_ON = 1;
 
     static {
         SECKILL_SCRIPT = new DefaultRedisScript<>();
@@ -109,6 +117,14 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Resource
     private IVoucherService voucherService;
+
+    @Resource
+    private VoucherMapper voucherMapper;
+
+    /** 取消和回补要走接口代理，本类里直接调用不会打开事务 */
+    @Resource
+    @Lazy
+    private IVoucherOrderService self;
 
     @Resource
     private IShopService shopService;
@@ -198,6 +214,40 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
         restoreSeckill(voucherId, userId, orderId);
         return Result.fail("下单失败，请重试");
+    }
+
+    @Override
+    @Transactional
+    public Result placeOrder(Long voucherId) {
+        Long userId = UserHolder.getUser().getId();
+        Voucher voucher = voucherId == null ? null : voucherService.getById(voucherId);
+        if (voucher == null || voucher.getStatus() == null || voucher.getStatus() != VOUCHER_STATUS_ON) {
+            return Result.fail("优惠券不存在");
+        }
+        if (voucher.getType() != null && voucher.getType() == VOUCHER_TYPE_SECKILL) {
+            return Result.fail("请使用限时抢购");
+        }
+        if (voucher.getType() == null || voucher.getType() != VOUCHER_TYPE_NORMAL) {
+            return Result.fail("优惠券不存在");
+        }
+        int deducted = voucherMapper.deductNormalStock(voucherId);
+        if (deducted != 1) {
+            return Result.fail("库存不足");
+        }
+        Long orderId = redisIdWorker.nextId("order");
+        VoucherOrder voucherOrder = new VoucherOrder();
+        voucherOrder.setId(orderId);
+        voucherOrder.setUserId(userId);
+        voucherOrder.setVoucherId(voucherId);
+        voucherOrder.setStatus(ORDER_STATUS_UNPAID);
+        save(voucherOrder);
+        try {
+            scheduleUnpaidCancel(orderId);
+        } catch (RuntimeException e) {
+            log.error("普通订单的取消消息没有发出去, orderId={}", orderId, e);
+            throw new IllegalStateException("下单失败，请重试");
+        }
+        return Result.ok(orderId.toString());
     }
 
     @Override
@@ -365,15 +415,45 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             return;
         }
         VoucherOrder order = getById(orderId);
-        boolean stockRestored = seckillVoucherService.update()
-                .setSql("stock = stock + 1")
-                .eq("voucher_id", order.getVoucherId())
-                .update();
-        if (!stockRestored) {
-            throw new IllegalStateException("秒杀库存回补失败, orderId=" + orderId);
+        if (order == null) {
+            throw new IllegalStateException("订单取消后找不到记录, orderId=" + orderId);
         }
-        // 提交前先记下补偿。进程若在回补 Redis 前退出，扫描器还能按订单号重试
-        rememberRestore(orderId, order.getUserId(), order.getVoucherId());
+        if (isSeckillVoucher(order.getVoucherId())) {
+            boolean stockRestored = seckillVoucherService.update()
+                    .setSql("stock = stock + 1")
+                    .eq("voucher_id", order.getVoucherId())
+                    .update();
+            if (!stockRestored) {
+                throw new IllegalStateException("秒杀库存回补失败, orderId=" + orderId);
+            }
+            // 提交前先记下补偿。进程若在回补 Redis 前退出，扫描器还能按订单号重试
+            rememberRestore(orderId, order.getUserId(), order.getVoucherId());
+            return;
+        }
+        int restored = voucherMapper.restoreNormalStock(order.getVoucherId());
+        if (restored != 1) {
+            throw new IllegalStateException("普通券库存回补失败, orderId=" + orderId);
+        }
+    }
+
+    @Override
+    public boolean releaseDemoOrders(Long userId) {
+        if (userId == null || hasInFlightSeckill(userId)) {
+            return false;
+        }
+        List<VoucherOrder> orders = query().eq("user_id", userId).list();
+        for (VoucherOrder order : orders) {
+            if (order.getStatus() != null && order.getStatus() == ORDER_STATUS_UNPAID) {
+                self.markOrderCancelled(order.getId());
+                self.restoreRedisIfCancelled(order.getId());
+            }
+        }
+        // 已支付的秒杀不退库存。清掉这个人的购买资格，新访客才能再买，也看不到这些订单
+        clearSeckillEligibility(userId);
+        if (!orders.isEmpty()) {
+            update().eq("user_id", userId).remove();
+        }
+        return true;
     }
 
     @Override
@@ -384,6 +464,10 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         String restoreKey = SECKILL_RESTORE_KEY + orderId;
         VoucherOrder order = getById(orderId);
         if (order == null || order.getStatus() == null || order.getStatus() != ORDER_STATUS_CANCELLED) {
+            stringRedisTemplate.delete(restoreKey);
+            return;
+        }
+        if (!isSeckillVoucher(order.getVoucherId())) {
             stringRedisTemplate.delete(restoreKey);
             return;
         }
@@ -587,6 +671,49 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             return "未支付";
         }
         return "未知";
+    }
+
+    private boolean isSeckillVoucher(Long voucherId) {
+        Voucher voucher = voucherId == null ? null : voucherService.getById(voucherId);
+        return voucher != null && voucher.getType() != null && voucher.getType() == VOUCHER_TYPE_SECKILL;
+    }
+
+    private boolean hasInFlightSeckill(Long userId) {
+        String user = userId.toString();
+        ScanOptions options = ScanOptions.scanOptions().match(SECKILL_PENDING_KEY + "*").count(100).build();
+        try (Cursor<String> cursor = stringRedisTemplate.scan(options)) {
+            while (cursor.hasNext()) {
+                String key = cursor.next();
+                DataType type = stringRedisTemplate.type(key);
+                if (type == DataType.HASH) {
+                    Object pendingUser = stringRedisTemplate.opsForHash().get(key, PENDING_USER_FIELD);
+                    if (pendingUser != null && user.equals(pendingUser.toString())) {
+                        return true;
+                    }
+                } else if (type == DataType.STRING) {
+                    String pending = stringRedisTemplate.opsForValue().get(key);
+                    if (pending != null && pending.startsWith(user + ":")) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private void clearSeckillEligibility(Long userId) {
+        String user = userId.toString();
+        scanKeys(SECKILL_HOLD_KEY + "*", key -> stringRedisTemplate.opsForHash().delete(key, user));
+        scanKeys(SECKILL_ORDER_KEY + "*", key -> stringRedisTemplate.opsForSet().remove(key, user));
+    }
+
+    private void scanKeys(String pattern, java.util.function.Consumer<String> action) {
+        ScanOptions options = ScanOptions.scanOptions().match(pattern).count(100).build();
+        try (Cursor<String> cursor = stringRedisTemplate.scan(options)) {
+            while (cursor.hasNext()) {
+                action.accept(cursor.next());
+            }
+        }
     }
 
     private String seckillFailMessage(int code) {

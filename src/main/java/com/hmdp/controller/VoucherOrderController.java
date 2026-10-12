@@ -32,6 +32,11 @@ public class VoucherOrderController {
         return voucherOrderService.seckillVoucher(voucherId);
     }
 
+    @PostMapping("{id}")
+    public Result placeOrder(@PathVariable("id") Long voucherId) {
+        return voucherOrderService.placeOrder(voucherId);
+    }
+
     @GetMapping("me")
     public Result pageMine(@RequestParam(value = "current", defaultValue = "1") Integer current) {
         return voucherOrderService.pageMine(current);

@@ -11,6 +11,8 @@
 -- ARGV[4] 下次允许补发的时间，毫秒。缺省当作 0
 -- 返回：0 通过，1 库存不足，2 不能重复下单，3 尚未开始，4 已经结束，5 秒杀券不存在
 -- 取消成功后预占会被删掉，同一个人可以再抢。回补时必须带原来的订单号。
+-- Redis 3.2 在 TIME 之后不能直接写。先打开单条复制，Redis 7 里这句没有额外作用。
+redis.replicate_commands()
 
 local stockKey = KEYS[1]
 local legacyKey = KEYS[2]

@@ -22,8 +22,8 @@ public interface IUserService extends IService<User> {
     Result login(LoginFormDTO loginForm, HttpSession session);
 
     /**
-     * 分配一个体验用户，返回和验证码登录相同的 token。
-     * 体验用户的手机号格式不能发验证码。同一 IP 有次数限制，总人数有上限。
+     * 分配一个体验用户，返回 token。手机号不能发验证码。同一 IP 有次数限制。
+     * 同时在线最多 100 个。空闲账号会清掉订单后再交给下一位，不会两个访客共用一个账号。
      * @param clientIp 调用方地址，用来限流
      */
     Result loginDemo(String clientIp);

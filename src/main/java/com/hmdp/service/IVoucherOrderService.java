@@ -26,6 +26,13 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
     Result seckillVoucher(Long voucherId);
 
     /**
+     * 普通券下单。同一个事务里扣 tb_voucher.stock 并写入未支付订单，再沿用秒杀那条延迟取消。
+     * @param voucherId 优惠券 id，type 必须是普通券
+     * @return data 是订单号字符串
+     */
+    Result placeOrder(Long voucherId);
+
+    /**
      * 查自己的订单。库里还没有行、但 Redis 里有这次预占时，返回处理中。
      * @param orderId 订单号
      */
@@ -52,10 +59,18 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
     VoucherOrderCreateStatus createVoucherOrder(VoucherOrderMessage message);
 
     /**
-     * 未支付改为已取消，并退回 MySQL 库存。提交前只记下回补任务，不在这个事务里改秒杀资格。
+     * 未支付改为已取消，并按券类型退回 MySQL 库存。秒杀券提交前只记下 Redis 回补任务；普通券只加 tb_voucher.stock。
      * @param orderId 订单号
      */
     void markOrderCancelled(Long orderId);
+
+    /**
+     * 体验账号交给下一位访客之前调用。未支付的先按券类型退库存，再删掉这个人的全部订单。
+     * 已支付的秒杀不退库存，只清掉购买资格。还有未入库的秒杀预占时返回 false，这次不回收。
+     * @param userId 体验用户 id
+     * @return false 表示先不要把这个账号给别人
+     */
+    boolean releaseDemoOrders(Long userId);
 
     /**
      * 数据库已经是已取消时，按订单号回补 Redis。预占如果已经换成新订单，脚本不会动它。

@@ -4,29 +4,48 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.bean.copier.CopyOptions;
 import cn.hutool.core.lang.UUID;
 import cn.hutool.core.util.RandomUtil;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.dto.LoginFormDTO;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
+import com.hmdp.entity.Blog;
+import com.hmdp.entity.BlogComments;
+import com.hmdp.entity.BlogFavorite;
 import com.hmdp.entity.User;
+import com.hmdp.mapper.BlogCommentsMapper;
+import com.hmdp.mapper.BlogFavoriteMapper;
+import com.hmdp.mapper.BlogMapper;
 import com.hmdp.mapper.UserMapper;
 import com.hmdp.service.IUserService;
+import com.hmdp.service.IVoucherOrderService;
 import com.hmdp.utils.RegexUtils;
 import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpSession;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import static com.hmdp.utils.RedisConstants.BLOG_LIKED_KEY;
 import static com.hmdp.utils.RedisConstants.DEMO_LOGIN_LIMIT_KEY;
+import static com.hmdp.utils.RedisConstants.DEMO_USER_LOCK_KEY;
 import static com.hmdp.utils.RedisConstants.DEMO_USER_SEQ_KEY;
 import static com.hmdp.utils.RedisConstants.LOGIN_CODE_KEY;
 import static com.hmdp.utils.RedisConstants.LOGIN_CODE_TTL;
 import static com.hmdp.utils.RedisConstants.LOGIN_USER_KEY;
 import static com.hmdp.utils.RedisConstants.LOGIN_USER_TTL;
+import static com.hmdp.utils.RedisConstants.UPLOAD_BLOG_KEY;
 import static com.hmdp.utils.SystemConstants.USER_NICK_NAME_PREFIX;
 
 /**
@@ -43,12 +62,33 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     /** 190 开头不满足验证码登录的手机号规则，不能靠日志里的验证码登录 */
     private static final String DEMO_PHONE_PREFIX = "190";
+    private static final String DEMO_ICON = "/imgs/icons/default-icon.png?v=8";
     private static final int DEMO_USER_LIMIT = 100;
     private static final int DEMO_LOGIN_LIMIT = 10;
     private static final long DEMO_LOGIN_WINDOW_MINUTES = 10L;
+    /** 体验 token 两小时过期。空出来的名额才能交给下一位，而不是一直占到 100 个为止 */
+    private static final long DEMO_SESSION_MINUTES = 120L;
+    private static final long DEMO_LOCK_WAIT_MILLIS = 1000L;
+    private static final String DEMO_BUSY = "体验登录繁忙，请稍后再试";
+    private static final String DEMO_FULL = "体验名额已满，请等其他体验结束后再试";
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+
+    @Resource
+    private RedissonClient redissonClient;
+
+    @Resource
+    private IVoucherOrderService voucherOrderService;
+
+    @Resource
+    private BlogMapper blogMapper;
+
+    @Resource
+    private BlogCommentsMapper blogCommentsMapper;
+
+    @Resource
+    private BlogFavoriteMapper blogFavoriteMapper;
 
     @Override
     public Result sendCode(String phone) {
@@ -93,11 +133,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         if (!allowDemoLogin(clientIp)) {
             return Result.fail("体验登录太频繁，请稍后再试");
         }
-        User user = assignDemoUser();
-        if (user == null) {
-            return Result.fail("体验名额已满，请稍后再试");
+        DemoAssignment assignment = assignDemoUser();
+        if (assignment.user == null) {
+            return Result.fail(assignment.failure);
         }
-        return Result.ok(issueToken(user));
+        return Result.ok(issueToken(assignment.user, DEMO_SESSION_MINUTES));
     }
 
     private boolean allowDemoLogin(String clientIp) {
@@ -115,33 +155,169 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     }
 
     /**
-     * 按序号新建体验用户。Redis 序号丢了时，从已有的 190 手机号接着编号，避免撞上唯一索引。
-     * 满员后不再复用旧账号，否则后进来的人会看到别人的订单，也不能再抢券。
+     * 恢复序号和分配新号在同一把锁里做完。手机号已经存在时继续取下一个，不把旧账号直接交出去。
+     * 100 个都建过之后，只回收没有登录态的账号，并先清掉它的订单。
      */
-    private User assignDemoUser() {
-        Long seq = stringRedisTemplate.opsForValue().increment(DEMO_USER_SEQ_KEY);
-        if (seq == null) {
+    private DemoAssignment assignDemoUser() {
+        RLock lock = redissonClient.getLock(DEMO_USER_LOCK_KEY);
+        boolean locked = false;
+        long deadline = System.currentTimeMillis() + DEMO_LOCK_WAIT_MILLIS;
+        try {
+            while (!locked) {
+                locked = lock.tryLock();
+                if (locked) {
+                    break;
+                }
+                if (System.currentTimeMillis() >= deadline) {
+                    return DemoAssignment.fail(DEMO_BUSY);
+                }
+                Thread.sleep(40L);
+            }
+            return assignDemoUserLocked();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return DemoAssignment.fail(DEMO_BUSY);
+        } finally {
+            if (locked && lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
+        }
+    }
+
+    private DemoAssignment assignDemoUserLocked() {
+        User created = createFreshDemoUser();
+        if (created != null) {
+            return DemoAssignment.ok(created);
+        }
+        User reclaimed = reclaimIdleDemoUser();
+        if (reclaimed == null) {
+            return DemoAssignment.fail(DEMO_FULL);
+        }
+        log.info("体验账号交给新访客, userId={}", reclaimed.getId());
+        return DemoAssignment.ok(reclaimed);
+    }
+
+    private User createFreshDemoUser() {
+        long existing = countDemoUsers();
+        if (existing >= DEMO_USER_LIMIT) {
             return null;
         }
-        if (seq == 1) {
-            long existing = query().likeRight("phone", DEMO_PHONE_PREFIX).count();
-            if (existing > 0) {
+        alignDemoSeq(existing);
+        for (int i = 0; i < DEMO_USER_LIMIT; i++) {
+            Long seq = stringRedisTemplate.opsForValue().increment(DEMO_USER_SEQ_KEY);
+            if (seq == null) {
+                return null;
+            }
+            if (seq > DEMO_USER_LIMIT) {
                 stringRedisTemplate.opsForValue().set(DEMO_USER_SEQ_KEY, String.valueOf(existing));
                 seq = stringRedisTemplate.opsForValue().increment(DEMO_USER_SEQ_KEY);
             }
+            if (seq == null || seq > DEMO_USER_LIMIT) {
+                return null;
+            }
+            String phone = String.format("%s%08d", DEMO_PHONE_PREFIX, seq);
+            if (query().eq("phone", phone).one() != null) {
+                continue;
+            }
+            try {
+                return createDemoUser(phone);
+            } catch (DuplicateKeyException e) {
+                log.info("体验手机号已被占用，继续下一个, phone={}", phone);
+            }
         }
-        if (seq == null || seq > DEMO_USER_LIMIT) {
-            return null;
+        return null;
+    }
+
+    /** Redis 序号若比库里的 190 手机号少，先对齐再自增。调用方必须已经拿着分配锁 */
+    private void alignDemoSeq(long existing) {
+        String raw = stringRedisTemplate.opsForValue().get(DEMO_USER_SEQ_KEY);
+        long seq = 0L;
+        if (raw != null) {
+            try {
+                seq = Long.parseLong(raw);
+            } catch (NumberFormatException e) {
+                seq = 0L;
+            }
         }
-        String phone = String.format("%s%08d", DEMO_PHONE_PREFIX, seq);
-        User existing = query().eq("phone", phone).one();
-        if (existing != null) {
-            return existing;
+        if (seq < existing) {
+            stringRedisTemplate.opsForValue().set(DEMO_USER_SEQ_KEY, String.valueOf(existing));
         }
-        try {
-            return createDemoUser(phone);
-        } catch (DuplicateKeyException e) {
-            return query().eq("phone", phone).one();
+    }
+
+    private long countDemoUsers() {
+        return query().likeRight("phone", DEMO_PHONE_PREFIX).count();
+    }
+
+    private User reclaimIdleDemoUser() {
+        Set<Long> active = activeLoginUserIds();
+        List<User> demos = query()
+                .likeRight("phone", DEMO_PHONE_PREFIX)
+                .orderByAsc("id")
+                .last("LIMIT " + DEMO_USER_LIMIT)
+                .list();
+        for (User user : demos) {
+            if (user.getId() == null || active.contains(user.getId())) {
+                continue;
+            }
+            if (!voucherOrderService.releaseDemoOrders(user.getId())) {
+                continue;
+            }
+            clearDemoFootprint(user.getId());
+            if (!DEMO_ICON.equals(user.getIcon())) {
+                update().set("icon", DEMO_ICON).eq("id", user.getId()).update();
+                user.setIcon(DEMO_ICON);
+            }
+            return user;
+        }
+        return null;
+    }
+
+    private Set<Long> activeLoginUserIds() {
+        Set<Long> ids = new HashSet<>();
+        ScanOptions options = ScanOptions.scanOptions().match(LOGIN_USER_KEY + "*").count(100).build();
+        try (Cursor<String> cursor = stringRedisTemplate.scan(options)) {
+            while (cursor.hasNext()) {
+                Object id = stringRedisTemplate.opsForHash().get(cursor.next(), "id");
+                if (id == null) {
+                    continue;
+                }
+                try {
+                    ids.add(Long.valueOf(id.toString()));
+                } catch (NumberFormatException ignored) {
+                    // 坏掉的登录哈希跳过，不当成某个体验用户还在线
+                }
+            }
+        }
+        return ids;
+    }
+
+    /** 新访客不该在个人页或笔记里看到上一位留下的内容 */
+    private void clearDemoFootprint(Long userId) {
+        List<BlogComments> comments = blogCommentsMapper.selectList(
+                new QueryWrapper<BlogComments>().eq("user_id", userId));
+        for (BlogComments comment : comments) {
+            if (comment.getBlogId() == null) {
+                continue;
+            }
+            blogMapper.update(null, new UpdateWrapper<Blog>()
+                    .setSql("comments = IF(comments > 0, comments - 1, 0)")
+                    .eq("id", comment.getBlogId()));
+        }
+        blogCommentsMapper.delete(new QueryWrapper<BlogComments>().eq("user_id", userId));
+        blogFavoriteMapper.delete(new QueryWrapper<BlogFavorite>().eq("user_id", userId));
+        List<Blog> blogs = blogMapper.selectList(new QueryWrapper<Blog>().eq("user_id", userId));
+        for (Blog blog : blogs) {
+            blogCommentsMapper.delete(new QueryWrapper<BlogComments>().eq("blog_id", blog.getId()));
+            blogFavoriteMapper.delete(new QueryWrapper<BlogFavorite>().eq("blog_id", blog.getId()));
+            blogMapper.deleteById(blog.getId());
+            stringRedisTemplate.delete(BLOG_LIKED_KEY + blog.getId());
+        }
+        stringRedisTemplate.delete(UPLOAD_BLOG_KEY + userId);
+        ScanOptions options = ScanOptions.scanOptions().match(BLOG_LIKED_KEY + "*").count(100).build();
+        try (Cursor<String> cursor = stringRedisTemplate.scan(options)) {
+            while (cursor.hasNext()) {
+                stringRedisTemplate.opsForZSet().remove(cursor.next(), userId.toString());
+            }
         }
     }
 
@@ -149,20 +325,42 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         User user = new User();
         user.setPhone(phone);
         user.setNickName("体验用户" + phone.substring(phone.length() - 4));
-        user.setIcon("/imgs/icons/default-icon.png?v=8");
+        user.setIcon(DEMO_ICON);
         save(user);
         return user;
     }
 
     private String issueToken(User user) {
+        return issueToken(user, LOGIN_USER_TTL);
+    }
+
+    private String issueToken(User user, long minutes) {
         UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
         String token = UUID.randomUUID().toString(true);
         String tokenKey = LOGIN_USER_KEY + token;
         java.util.Map<String, Object> userMap = BeanUtil.beanToMap(userDTO, new java.util.HashMap<>(),
                 CopyOptions.create().setIgnoreNullValue(true).setFieldValueEditor((field, value) -> value.toString()));
         stringRedisTemplate.opsForHash().putAll(tokenKey, userMap);
-        stringRedisTemplate.expire(tokenKey, LOGIN_USER_TTL, TimeUnit.MINUTES);
+        stringRedisTemplate.expire(tokenKey, minutes, TimeUnit.MINUTES);
         return token;
+    }
+
+    private static final class DemoAssignment {
+        private final User user;
+        private final String failure;
+
+        private DemoAssignment(User user, String failure) {
+            this.user = user;
+            this.failure = failure;
+        }
+
+        private static DemoAssignment ok(User user) {
+            return new DemoAssignment(user, null);
+        }
+
+        private static DemoAssignment fail(String failure) {
+            return new DemoAssignment(null, failure);
+        }
     }
 
     @Override

@@ -70,6 +70,29 @@ SET title = '巷里咖啡50元券',
 WHERE id = 1
   AND shop_id = 1;
 
+-- 普通券库存放在 tb_voucher.stock。秒杀券仍用 tb_seckill_voucher，这一列保持空。
+SET @citygo_voucher_stock := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'tb_voucher'
+    AND COLUMN_NAME = 'stock'
+);
+SET @citygo_voucher_stock_sql := IF(
+  @citygo_voucher_stock = 0,
+  'ALTER TABLE tb_voucher ADD COLUMN stock int(8) NULL DEFAULT NULL COMMENT ''普通券库存。秒杀券不使用这一列'' AFTER status',
+  'SELECT 1'
+);
+PREPARE citygo_stmt FROM @citygo_voucher_stock_sql;
+EXECUTE citygo_stmt;
+DEALLOCATE PREPARE citygo_stmt;
+
+UPDATE tb_voucher
+SET stock = 100
+WHERE id = 1
+  AND shop_id = 1
+  AND type = 0
+  AND stock IS NULL;
+
 -- 笔记 5 挂在店铺 1，改成咖啡馆，不改点赞数和评论数。正文用换行，不再写 HTML。
 UPDATE tb_blog
 SET title = '巷里咖啡：窗口座位和一杯美式',

@@ -36,6 +36,7 @@ import java.util.concurrent.Future;
 public class SeckillOrderFlowTest {
 
     private static final long VOUCHER_ID = 99021L;
+    private static final long NORMAL_VOUCHER_ID = 99022L;
     private static final long USER_ID = 9902101L;
     private static final long ORDER_ID = 99021001L;
     private static final long NEXT_ORDER_ID = 99021002L;
@@ -52,10 +53,10 @@ public class SeckillOrderFlowTest {
     @AfterEach
     public void cleanup() {
         UserHolder.removeUser();
-        jdbcTemplate.update("DELETE FROM tb_voucher_order WHERE id IN (?, ?) OR voucher_id = ?",
-                ORDER_ID, NEXT_ORDER_ID, VOUCHER_ID);
+        jdbcTemplate.update("DELETE FROM tb_voucher_order WHERE id IN (?, ?) OR voucher_id IN (?, ?)",
+                ORDER_ID, NEXT_ORDER_ID, VOUCHER_ID, NORMAL_VOUCHER_ID);
         jdbcTemplate.update("DELETE FROM tb_seckill_voucher WHERE voucher_id = ?", VOUCHER_ID);
-        jdbcTemplate.update("DELETE FROM tb_voucher WHERE id = ?", VOUCHER_ID);
+        jdbcTemplate.update("DELETE FROM tb_voucher WHERE id IN (?, ?)", VOUCHER_ID, NORMAL_VOUCHER_ID);
         stringRedisTemplate.delete("seckill:stock:" + VOUCHER_ID);
         stringRedisTemplate.delete("seckill:order:" + VOUCHER_ID);
         stringRedisTemplate.delete("seckill:hold:" + VOUCHER_ID);
@@ -158,6 +159,40 @@ public class SeckillOrderFlowTest {
         Assertions.assertEquals("1", stringRedisTemplate.opsForValue().get("seckill:stock:" + VOUCHER_ID));
     }
 
+    @Test
+    public void normalOrderDeductsAndCancelRestoresOnlyThatStock() {
+        jdbcTemplate.update(
+                "INSERT INTO tb_voucher (id, shop_id, title, pay_value, actual_value, type, status, stock) VALUES (?, 1, 'normal-test', 100, 100, 0, 1, 2)",
+                NORMAL_VOUCHER_ID);
+        UserDTO user = new UserDTO();
+        user.setId(USER_ID);
+        UserHolder.saveUser(user);
+        Result first = voucherOrderService.placeOrder(NORMAL_VOUCHER_ID);
+        Result second = voucherOrderService.placeOrder(NORMAL_VOUCHER_ID);
+        Result third = voucherOrderService.placeOrder(NORMAL_VOUCHER_ID);
+        Assertions.assertEquals(Boolean.TRUE, first.getSuccess());
+        Assertions.assertEquals(Boolean.TRUE, second.getSuccess());
+        Assertions.assertEquals(Boolean.FALSE, third.getSuccess());
+        Assertions.assertEquals(Integer.valueOf(0), normalStock());
+        Long orderId = Long.valueOf(String.valueOf(first.getData()));
+        voucherOrderService.markOrderCancelled(orderId);
+        Assertions.assertEquals(Integer.valueOf(1), normalStock());
+        Assertions.assertNull(stringRedisTemplate.opsForHash().get("seckill:restore:" + orderId, "userId"));
+        Assertions.assertEquals(0, jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM tb_seckill_voucher WHERE voucher_id = ?", Integer.class, NORMAL_VOUCHER_ID).intValue());
+    }
+
+    @Test
+    public void seckillOrderRejectsNormalPlace() {
+        prepareVoucher(3);
+        UserDTO user = new UserDTO();
+        user.setId(USER_ID);
+        UserHolder.saveUser(user);
+        Result result = voucherOrderService.placeOrder(VOUCHER_ID);
+        Assertions.assertEquals(Boolean.FALSE, result.getSuccess());
+        Assertions.assertEquals(Integer.valueOf(3), currentStock());
+    }
+
     private void prepareVoucher(int stock) {
         cleanup();
         jdbcTemplate.update(
@@ -174,6 +209,10 @@ public class SeckillOrderFlowTest {
         message.setUserId(USER_ID);
         message.setVoucherId(VOUCHER_ID);
         return message;
+    }
+
+    private Integer normalStock() {
+        return jdbcTemplate.queryForObject("SELECT stock FROM tb_voucher WHERE id = ?", Integer.class, NORMAL_VOUCHER_ID);
     }
 
     private Integer currentStock() {

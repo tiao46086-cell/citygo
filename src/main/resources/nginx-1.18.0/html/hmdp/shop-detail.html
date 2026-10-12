@@ -46,13 +46,16 @@
         <div>
           <h3>{{v.title}}</h3>
           <p>{{v.subTitle}}</p>
-          <p v-if="v.type">剩余 {{v.stock}} 张 · {{formatTime(v)}}</p>
+          <p v-if="v.stock != null">剩余 {{v.stock}} 张<span v-if="v.type"> · {{formatTime(v)}}</span></p>
         </div>
         <div class="cg-ticket-side">
           <div class="cg-price">¥ {{util.formatPrice(v.payValue)}}</div>
           <p>{{discount(v)}}</p>
-          <button v-if="v.type" class="cg-btn" :disabled="seckillId === v.id || isNotBegin(v) || v.stock < 1" @click="seckill(v)">
+          <button v-if="v.type" class="cg-btn" :disabled="seckillId === v.id || buyingId === v.id || isNotBegin(v) || v.stock < 1" @click="seckill(v)">
             {{seckillId === v.id ? "提交中" : "限时抢购"}}
+          </button>
+          <button v-else class="cg-btn" :disabled="buyingId === v.id || seckillId || v.stock < 1" @click="buy(v)">
+            {{buyingId === v.id ? "提交中" : "购买"}}
           </button>
         </div>
       </article>
@@ -80,9 +83,11 @@
       shopState: "loading",
       types: [],
       activeImage: 0,
+      shopId: "",
       vouchers: [],
       voucherState: "loading",
       seckillId: null,
+      buyingId: null,
       pendingOrderId: "",
       orderState: "",
       paying: false,
@@ -104,10 +109,10 @@
       }
     },
     created() {
-      let shopId = util.getUrlParam("id");
+      this.shopId = util.getUrlParam("id");
       this.queryTypes();
-      this.queryShopById(shopId);
-      this.queryVoucher(shopId);
+      this.queryShopById(this.shopId);
+      this.queryVoucher(this.shopId);
     },
     methods: {
       goBack() {
@@ -187,8 +192,33 @@
         e.target.dataset.fallback = "1";
         e.target.src = this.placeholder;
       },
+      buy(v) {
+        if (this.buyingId || this.seckillId) {
+          return;
+        }
+        if (!token) {
+          this.$message.error("请先登录");
+          setTimeout(() => { location.href = "/login.html"; }, 200);
+          return;
+        }
+        if (v.stock < 1) {
+          this.$message.error("库存不足");
+          return;
+        }
+        this.buyingId = v.id;
+        this.orderState = "";
+        this.pendingOrderId = "";
+        axios.post("/voucher-order/" + v.id)
+          .then(({data}) => {
+            this.pendingOrderId = String(data);
+            this.orderState = "未支付";
+            this.queryVoucher(this.shopId);
+          })
+          .catch(err => this.$message.error(err))
+          .then(() => { this.buyingId = null; })
+      },
       seckill(v) {
-        if (this.seckillId) {
+        if (this.seckillId || this.buyingId) {
           return;
         }
         if (!token) {
