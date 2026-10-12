@@ -1,5 +1,6 @@
 package com.hmdp.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.dto.Result;
@@ -84,7 +85,13 @@ public class BlogCommentsServiceImpl extends ServiceImpl<BlogCommentsMapper, Blo
         if (!userId.equals(comment.getUserId())) {
             return Result.fail("无权限");
         }
-        removeById(id);
+        boolean removed = remove(new QueryWrapper<BlogComments>()
+                .eq("id", id)
+                .eq("user_id", userId)
+                .eq("parent_id", TOP_LEVEL));
+        if (!removed) {
+            return Result.fail("评论不存在");
+        }
         blogService.update()
                 .setSql("comments = comments - 1")
                 .eq("id", comment.getBlogId())

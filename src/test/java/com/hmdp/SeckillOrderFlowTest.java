@@ -4,6 +4,7 @@ import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.dto.VoucherOrderCreateStatus;
 import com.hmdp.dto.VoucherOrderMessage;
+import com.hmdp.dto.VoucherOrderStatus;
 import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.VoucherOrder;
 import com.hmdp.service.ISeckillVoucherService;
@@ -20,6 +21,7 @@ import org.springframework.test.context.TestPropertySource;
 
 import javax.annotation.Resource;
 import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -65,6 +67,9 @@ public class SeckillOrderFlowTest {
         stringRedisTemplate.delete("seckill:pending:" + NEXT_ORDER_ID);
         stringRedisTemplate.delete("seckill:restore:" + ORDER_ID);
         stringRedisTemplate.delete("seckill:restore:" + NEXT_ORDER_ID);
+        stringRedisTemplate.delete("seckill:failed:" + ORDER_ID);
+        stringRedisTemplate.delete("seckill:failed:" + NEXT_ORDER_ID);
+        jdbcTemplate.update("DELETE FROM tb_user WHERE id = ? OR phone = ?", USER_ID, "12000009921");
     }
 
     @Test
@@ -216,6 +221,70 @@ public class SeckillOrderFlowTest {
         voucherOrderService.markOrderCancelled(orderId);
         Assertions.assertEquals(Integer.valueOf(1), normalStock());
         Assertions.assertEquals(Integer.valueOf(4), voucherOrderService.getById(orderId).getStatus());
+    }
+
+    @Test
+    public void failedCreateReleasesHoldAndReportsFailure() {
+        prepareVoucher(3);
+        stringRedisTemplate.opsForValue().set("seckill:stock:" + VOUCHER_ID, "2");
+        stringRedisTemplate.opsForHash().put("seckill:voucher:" + VOUCHER_ID, "beginTime", "1");
+        stringRedisTemplate.opsForHash().put("seckill:voucher:" + VOUCHER_ID, "endTime", "9999999999");
+        Assertions.assertEquals(Long.valueOf(0), runSeckill(ORDER_ID));
+        Assertions.assertTrue(voucherOrderService.abandonFailedCreate(ORDER_ID, USER_ID, VOUCHER_ID));
+        Assertions.assertEquals("2", stringRedisTemplate.opsForValue().get("seckill:stock:" + VOUCHER_ID));
+        Assertions.assertNull(stringRedisTemplate.opsForHash().get("seckill:hold:" + VOUCHER_ID, String.valueOf(USER_ID)));
+        Assertions.assertEquals(Boolean.FALSE, stringRedisTemplate.hasKey("seckill:pending:" + ORDER_ID));
+        Assertions.assertEquals(String.valueOf(USER_ID), stringRedisTemplate.opsForValue().get("seckill:failed:" + ORDER_ID));
+        UserDTO user = new UserDTO();
+        user.setId(USER_ID);
+        UserHolder.saveUser(user);
+        Result query = voucherOrderService.queryOrder(ORDER_ID);
+        Assertions.assertEquals("下单失败", ((VoucherOrderStatus) query.getData()).getState());
+        Assertions.assertEquals(Integer.valueOf(3), currentStock());
+        Assertions.assertTrue(voucherOrderService.abandonFailedCreate(ORDER_ID, USER_ID, VOUCHER_ID));
+        Assertions.assertEquals("2", stringRedisTemplate.opsForValue().get("seckill:stock:" + VOUCHER_ID));
+    }
+
+    @Test
+    public void failedCreateDoesNotRestoreStockWhenOrderExists() {
+        prepareVoucher(3);
+        Assertions.assertEquals(VoucherOrderCreateStatus.CREATED, voucherOrderService.createVoucherOrder(message(ORDER_ID)));
+        stringRedisTemplate.opsForValue().set("seckill:stock:" + VOUCHER_ID, "0");
+        stringRedisTemplate.opsForHash().put("seckill:hold:" + VOUCHER_ID, String.valueOf(USER_ID), String.valueOf(ORDER_ID));
+        stringRedisTemplate.opsForHash().put("seckill:pending:" + ORDER_ID, "userId", String.valueOf(USER_ID));
+        stringRedisTemplate.opsForHash().put("seckill:pending:" + ORDER_ID, "voucherId", String.valueOf(VOUCHER_ID));
+        stringRedisTemplate.opsForHash().put("seckill:pending:" + ORDER_ID, "state", "stopped");
+        Assertions.assertTrue(voucherOrderService.abandonFailedCreate(ORDER_ID, USER_ID, VOUCHER_ID));
+        Assertions.assertEquals(Integer.valueOf(2), currentStock());
+        Assertions.assertEquals("0", stringRedisTemplate.opsForValue().get("seckill:stock:" + VOUCHER_ID));
+        Assertions.assertEquals(String.valueOf(ORDER_ID),
+                stringRedisTemplate.opsForHash().get("seckill:hold:" + VOUCHER_ID, String.valueOf(USER_ID)));
+        Assertions.assertNull(stringRedisTemplate.opsForValue().get("seckill:failed:" + ORDER_ID));
+        Assertions.assertEquals(Boolean.FALSE, stringRedisTemplate.hasKey("seckill:pending:" + ORDER_ID));
+    }
+
+    @Test
+    public void recycleKeepsOrderSoRedeliveryDoesNotDeductAgain() {
+        prepareVoucher(3);
+        jdbcTemplate.update("DELETE FROM tb_user WHERE id = ? OR phone = ?", USER_ID, "12000009921");
+        jdbcTemplate.update(
+                "INSERT INTO tb_user (id, phone, nick_name) VALUES (?, '12000009921', 'flow')", USER_ID);
+        Assertions.assertEquals(VoucherOrderCreateStatus.CREATED, voucherOrderService.createVoucherOrder(message(ORDER_ID)));
+        Assertions.assertEquals(Integer.valueOf(2), currentStock());
+        UserDTO user = new UserDTO();
+        user.setId(USER_ID);
+        UserHolder.saveUser(user);
+        Assertions.assertTrue(voucherOrderService.releaseDemoOrders(USER_ID));
+        Assertions.assertEquals(Integer.valueOf(3), currentStock());
+        Assertions.assertEquals(Integer.valueOf(4), voucherOrderService.getById(ORDER_ID).getStatus());
+        Assertions.assertEquals(VoucherOrderCreateStatus.EXISTS, voucherOrderService.createVoucherOrder(message(ORDER_ID)));
+        Assertions.assertEquals(Integer.valueOf(3), currentStock());
+        Assertions.assertEquals(Integer.valueOf(1), jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM tb_voucher_order WHERE id = ?", Integer.class, ORDER_ID));
+        Result page = voucherOrderService.pageMine(1);
+        Assertions.assertTrue(((List<?>) page.getData()).isEmpty());
+        Assertions.assertEquals("订单不存在", voucherOrderService.queryOrder(ORDER_ID).getErrorMsg());
+        Assertions.assertEquals("订单不存在", voucherOrderService.payOrder(ORDER_ID).getErrorMsg());
     }
 
     @Test

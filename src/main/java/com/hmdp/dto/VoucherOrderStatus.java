@@ -17,6 +17,6 @@ public class VoucherOrderStatus {
     /** 1 未支付，2 已支付，4 已取消。处理中还没有行，这里是 null */
     private Integer status;
 
-    /** 处理中、未支付、已支付、已取消、已超时 */
+    /** 处理中、下单失败、未支付、已支付、已取消、已超时 */
     private String state;
 }

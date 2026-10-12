@@ -99,14 +99,33 @@ public class SeckillOrderListener {
     }
 
     private void park(Channel channel, long deliveryTag, Object payload, int times) throws IOException {
-        if (!markForwarded(payload, true)) {
+        if (payload instanceof VoucherOrderMessage) {
+            VoucherOrderMessage message = (VoucherOrderMessage) payload;
+            try {
+                boolean released = voucherOrderService.abandonFailedCreate(
+                        message.getOrderId(), message.getUserId(), message.getVoucherId());
+                if (!released) {
+                    channel.basicNack(deliveryTag, false, true);
+                    return;
+                }
+            } catch (RuntimeException e) {
+                log.error("秒杀失败后的退回没有完成, payload={}", payload, e);
+                channel.basicNack(deliveryTag, false, true);
+                return;
+            }
+        } else if (!markForwarded(payload, true)) {
             channel.basicNack(deliveryTag, false, true);
             return;
         }
         ConfirmedSender.Outcome outcome = confirmedSender.send(
                 RabbitMqConfig.SECKILL_ORDER_FAIL_QUEUE, payload, retryHeader(times));
         if (outcome != ConfirmedSender.Outcome.ACCEPTED) {
-            log.error("失败队列没有确认收到，原消息重新入队, payload={}, outcome={}", payload, outcome);
+            log.error("失败队列没有确认收到, payload={}, outcome={}", payload, outcome);
+            if (payload instanceof VoucherOrderMessage) {
+                // 资格已经退回。下单消息不能重新入队，否则会再扣一次数据库库存
+                channel.basicAck(deliveryTag, false);
+                return;
+            }
             channel.basicNack(deliveryTag, false, true);
             return;
         }

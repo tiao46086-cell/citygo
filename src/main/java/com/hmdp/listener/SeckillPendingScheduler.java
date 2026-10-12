@@ -19,6 +19,7 @@ import java.util.Map;
 
 import static com.hmdp.utils.RedisConstants.PENDING_NEXT_FIELD;
 import static com.hmdp.utils.RedisConstants.PENDING_STATE_FIELD;
+import static com.hmdp.utils.RedisConstants.PENDING_STATE_STOPPED;
 import static com.hmdp.utils.RedisConstants.PENDING_STATE_WAITING;
 import static com.hmdp.utils.RedisConstants.PENDING_USER_FIELD;
 import static com.hmdp.utils.RedisConstants.PENDING_VOUCHER_FIELD;
@@ -28,7 +29,7 @@ import static com.hmdp.utils.RedisConstants.SECKILL_RESTORE_KEY;
 
 /**
  * 发布确认超时后，预占还在 seckill:pending 里。到了 nextRetryAt 就补发同一单。
- * 查询订单只读这个 Hash，不会把时间清掉。state 不是 waiting 的不再自动补发。
+ * 查询订单只读这个 Hash，不会把时间清掉。state 为 stopped 时退回预占，不再补发下单消息。
  * 取消已经写进数据库、Redis 还占着资格时，按 seckill:restore 再回补。
  * 延迟取消消息如果没到，这里再扫已超时的未支付订单。
  */
@@ -75,6 +76,10 @@ public class SeckillPendingScheduler {
         }
         Map<Object, Object> pending = stringRedisTemplate.opsForHash().entries(key);
         String state = text(pending.get(PENDING_STATE_FIELD));
+        if (PENDING_STATE_STOPPED.equals(state)) {
+            compensateStopped(key, pending);
+            return;
+        }
         if (!PENDING_STATE_WAITING.equals(state)) {
             return;
         }
@@ -106,6 +111,24 @@ public class SeckillPendingScheduler {
         // 确认成功，或确认超时但消息可能已经在队列里。把下次时间推后，查询不会改这个字段
         voucherOrderService.postponePendingRetry(orderId);
         log.info("已补发秒杀订单, orderId={}, outcome={}", orderId, outcome);
+    }
+
+    /** 以前次数用完只把状态改成 stopped。这里补上退库存，避免预占一直占着 */
+    private void compensateStopped(String key, Map<Object, Object> pending) {
+        Long orderId = parseLong(key.substring(SECKILL_PENDING_KEY.length()));
+        Long userId = parseLong(text(pending.get(PENDING_USER_FIELD)));
+        Long voucherId = parseLong(text(pending.get(PENDING_VOUCHER_FIELD)));
+        if (orderId == null || userId == null || voucherId == null) {
+            log.error("失败的秒杀预占无法解析, key={}", key);
+            return;
+        }
+        try {
+            if (!voucherOrderService.abandonFailedCreate(orderId, userId, voucherId)) {
+                log.error("秒杀失败补偿没有完成, orderId={}", orderId);
+            }
+        } catch (RuntimeException e) {
+            log.error("秒杀失败补偿出错, orderId={}", orderId, e);
+        }
     }
 
     /** 改成 Hash 之前的预占是 userId:voucherId。读完改写成 Hash，避免再靠空闲时间计时 */

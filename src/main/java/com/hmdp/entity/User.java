@@ -62,5 +62,11 @@ public class User implements Serializable {
      */
     private LocalDateTime updateTime;
 
+    /**
+     * 体验账号上次交给新访客时，这个订单号及更早的订单仍留在库里，但不再展示。
+     * 空表示没有隐藏过。订单行不能删，否则秒杀消息重投会再次扣库存。
+     */
+    private Long demoOrderAfter;
+
 
 }

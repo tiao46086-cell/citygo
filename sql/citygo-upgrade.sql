@@ -16,3 +16,19 @@ SET @citygo_voucher_stock_sql := IF(
 PREPARE citygo_stmt FROM @citygo_voucher_stock_sql;
 EXECUTE citygo_stmt;
 DEALLOCATE PREPARE citygo_stmt;
+
+-- 体验账号回收后隐藏旧订单，但不删除订单行。秒杀消息重投仍能靠主键认出这一单。
+SET @citygo_demo_order_after := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'tb_user'
+    AND COLUMN_NAME = 'demo_order_after'
+);
+SET @citygo_demo_order_after_sql := IF(
+  @citygo_demo_order_after = 0,
+  'ALTER TABLE tb_user ADD COLUMN demo_order_after bigint(20) NULL DEFAULT NULL COMMENT ''体验账号隐藏该订单号及更早的订单'' AFTER update_time',
+  'SELECT 1'
+);
+PREPARE citygo_stmt FROM @citygo_demo_order_after_sql;
+EXECUTE citygo_stmt;
+DEALLOCATE PREPARE citygo_stmt;

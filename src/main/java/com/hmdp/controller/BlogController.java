@@ -49,12 +49,11 @@ public class BlogController {
         }
         UserDTO user = UserHolder.getUser();
         blog.setUserId(user.getId());
-        if (blog.getLiked() == null) {
-            blog.setLiked(0);
-        }
-        if (blog.getComments() == null) {
-            blog.setComments(0);
-        }
+        blog.setId(null);
+        blog.setLiked(0);
+        blog.setComments(0);
+        blog.setCreateTime(null);
+        blog.setUpdateTime(null);
         blogService.save(blog);
         return Result.ok(blog.getId());
     }

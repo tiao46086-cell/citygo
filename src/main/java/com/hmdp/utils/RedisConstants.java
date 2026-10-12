@@ -31,6 +31,8 @@ public class RedisConstants {
     public static final String SECKILL_ORDER_KEY = "seckill:order:";
     public static final String SECKILL_HOLD_KEY = "seckill:hold:";
     public static final String SECKILL_PENDING_KEY = "seckill:pending:";
+    /** 下单最终失败并退回预占后，短时间告诉查询接口这不是处理中 */
+    public static final String SECKILL_FAILED_KEY = "seckill:failed:";
     /** 数据库已取消、Redis 还没回补时留着，扫描器按订单号重试 */
     public static final String SECKILL_RESTORE_KEY = "seckill:restore:";
     public static final String SECKILL_VOUCHER_KEY = "seckill:voucher:";

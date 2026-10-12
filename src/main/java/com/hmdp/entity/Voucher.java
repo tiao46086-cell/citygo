@@ -73,7 +73,8 @@ public class Voucher implements Serializable {
      */
     private Integer status;
     /**
-     * 库存
+     * 列表接口填上的库存。秒杀券来自 tb_seckill_voucher，普通券来自 tb_voucher.stock。
+     * 不参与 MyBatis-Plus 的插入，避免把秒杀请求里的库存写进普通券那一列。
      */
     @TableField(exist = false)
     private Integer stock;

@@ -1,5 +1,6 @@
 package com.hmdp.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.config.RabbitMqConfig;
@@ -10,8 +11,10 @@ import com.hmdp.dto.VoucherOrderMessage;
 import com.hmdp.dto.VoucherOrderStatus;
 import com.hmdp.dto.VoucherOrderView;
 import com.hmdp.entity.Shop;
+import com.hmdp.entity.User;
 import com.hmdp.entity.Voucher;
 import com.hmdp.entity.VoucherOrder;
+import com.hmdp.mapper.UserMapper;
 import com.hmdp.mapper.VoucherMapper;
 import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.service.ISeckillVoucherService;
@@ -62,6 +65,7 @@ import static com.hmdp.utils.RedisConstants.PENDING_STATE_STOPPED;
 import static com.hmdp.utils.RedisConstants.PENDING_STATE_WAITING;
 import static com.hmdp.utils.RedisConstants.PENDING_USER_FIELD;
 import static com.hmdp.utils.RedisConstants.PENDING_VOUCHER_FIELD;
+import static com.hmdp.utils.RedisConstants.SECKILL_FAILED_KEY;
 import static com.hmdp.utils.RedisConstants.SECKILL_HOLD_KEY;
 import static com.hmdp.utils.RedisConstants.SECKILL_LIMIT_KEY;
 import static com.hmdp.utils.RedisConstants.SECKILL_ORDER_KEY;
@@ -99,6 +103,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     private static final int VOUCHER_TYPE_NORMAL = 0;
     private static final int VOUCHER_TYPE_SECKILL = 1;
     private static final int VOUCHER_STATUS_ON = 1;
+    /** 下单最终失败后，查询接口在这段时间内返回「下单失败」 */
+    private static final long SECKILL_FAILED_MINUTES = 10L;
 
     static {
         SECKILL_SCRIPT = new DefaultRedisScript<>();
@@ -120,6 +126,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Resource
     private VoucherMapper voucherMapper;
+
+    @Resource
+    private UserMapper userMapper;
 
     /** 取消和回补要走接口代理，本类里直接调用不会打开事务 */
     @Resource
@@ -254,21 +263,28 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     public Result queryOrder(Long orderId) {
         Long userId = UserHolder.getUser().getId();
         VoucherOrder order = getById(orderId);
-        if (order != null) {
-            if (!userId.equals(order.getUserId())) {
-                return Result.fail("订单不存在");
-            }
+        if (order != null && userId.equals(order.getUserId()) && !hiddenByDemoCutoff(userId, orderId)) {
             VoucherOrderStatus view = new VoucherOrderStatus();
             view.setOrderId(orderId);
             view.setStatus(order.getStatus());
             view.setState(orderState(order));
             return Result.ok(view);
         }
+        if (order != null) {
+            return Result.fail("订单不存在");
+        }
         // 只读预占。不能 GET 字符串或改 nextRetryAt，否则补发时间会被查询推迟
         if (pendingBelongsTo(orderId, userId)) {
             VoucherOrderStatus view = new VoucherOrderStatus();
             view.setOrderId(orderId);
             view.setState("处理中");
+            return Result.ok(view);
+        }
+        String failedUser = stringRedisTemplate.opsForValue().get(SECKILL_FAILED_KEY + orderId);
+        if (userId.toString().equals(failedUser)) {
+            VoucherOrderStatus view = new VoucherOrderStatus();
+            view.setOrderId(orderId);
+            view.setState("下单失败");
             return Result.ok(view);
         }
         return Result.fail("订单不存在");
@@ -278,8 +294,10 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     public Result pageMine(Integer current) {
         int pageNo = current == null || current < 1 ? 1 : current;
         Long userId = UserHolder.getUser().getId();
+        Long after = demoOrderAfter(userId);
         Page<VoucherOrder> page = query()
                 .eq("user_id", userId)
+                .gt(after != null, "id", after == null ? 0L : after)
                 .orderByDesc("create_time")
                 .orderByDesc("id")
                 .page(new Page<>(pageNo, SystemConstants.MAX_PAGE_SIZE));
@@ -369,6 +387,9 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Override
     public Result payOrder(Long orderId) {
         Long userId = UserHolder.getUser().getId();
+        if (orderId == null || hiddenByDemoCutoff(userId, orderId)) {
+            return Result.fail("订单不存在");
+        }
         long seconds = unpaidTimeout.getSeconds();
         // 期限用数据库的 NOW()，避免 JVM 时区和 JDBC 的 UTC 差 8 小时
         boolean paid = update()
@@ -448,11 +469,35 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 self.restoreRedisIfCancelled(order.getId());
             }
         }
-        // 已支付的秒杀不退库存。清掉这个人的购买资格，新访客才能再买，也看不到这些订单
+        // 已支付的秒杀不退库存。清掉购买资格，新访客才能再买。订单行留下，消息重投仍能认出这一单
         clearSeckillEligibility(userId);
-        if (!orders.isEmpty()) {
-            update().eq("user_id", userId).remove();
+        long cutoff = redisIdWorker.nextId("order");
+        int marked = userMapper.update(null, new UpdateWrapper<User>()
+                .set("demo_order_after", cutoff)
+                .eq("id", userId));
+        if (marked != 1) {
+            log.error("体验账号没有记下订单分界, userId={}", userId);
+            return false;
         }
+        return true;
+    }
+
+    @Override
+    public boolean abandonFailedCreate(Long orderId, Long userId, Long voucherId) {
+        if (orderId == null || userId == null || voucherId == null) {
+            return true;
+        }
+        if (getById(orderId) != null) {
+            stringRedisTemplate.delete(SECKILL_PENDING_KEY + orderId);
+            return true;
+        }
+        Long restored = restoreSeckill(voucherId, userId, orderId);
+        if (restored == null) {
+            return false;
+        }
+        stringRedisTemplate.delete(SECKILL_PENDING_KEY + orderId);
+        stringRedisTemplate.opsForValue().set(
+                SECKILL_FAILED_KEY + orderId, userId.toString(), SECKILL_FAILED_MINUTES, TimeUnit.MINUTES);
         return true;
     }
 
@@ -671,6 +716,17 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             return "未支付";
         }
         return "未知";
+    }
+
+    private Long demoOrderAfter(Long userId) {
+        User user = userId == null ? null : userMapper.selectById(userId);
+        return user == null ? null : user.getDemoOrderAfter();
+    }
+
+    /** 体验账号交给新访客之后，分界订单号以及更早的订单不再展示，但行还在 */
+    private boolean hiddenByDemoCutoff(Long userId, Long orderId) {
+        Long after = demoOrderAfter(userId);
+        return after != null && orderId != null && orderId <= after;
     }
 
     private boolean isSeckillVoucher(Long voucherId) {

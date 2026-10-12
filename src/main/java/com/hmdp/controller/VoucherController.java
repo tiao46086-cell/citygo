@@ -38,8 +38,7 @@ public class VoucherController {
         if (denied != null) {
             return denied;
         }
-        voucherService.save(voucher);
-        return Result.ok(voucher.getId());
+        return voucherService.addNormalVoucher(voucher);
     }
 
     /**

@@ -33,7 +33,7 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
     Result placeOrder(Long voucherId);
 
     /**
-     * 查自己的订单。库里还没有行、但 Redis 里有这次预占时，返回处理中。
+     * 查自己的订单。库里还没有行、但 Redis 里有这次预占时，返回处理中。预占已退回时返回下单失败。
      * @param orderId 订单号
      */
     Result queryOrder(Long orderId);
@@ -65,12 +65,19 @@ public interface IVoucherOrderService extends IService<VoucherOrder> {
     void markOrderCancelled(Long orderId);
 
     /**
-     * 体验账号交给下一位访客之前调用。未支付的先按券类型退库存，再删掉这个人的全部订单。
-     * 已支付的秒杀不退库存，只清掉购买资格。还有未入库的秒杀预占时返回 false，这次不回收。
+     * 体验账号交给下一位访客之前调用。未支付的先按券类型退库存。订单行保留，并用新的订单号作为分界，
+     * 这个号以及更早的订单不再展示。已支付的秒杀不退库存，只清掉购买资格。还有未入库的秒杀预占时返回 false。
      * @param userId 体验用户 id
      * @return false 表示先不要把这个账号给别人
      */
     boolean releaseDemoOrders(Long userId);
+
+    /**
+     * 下单消息次数用完仍没有订单时，退回 Redis 库存和购买资格，并记下失败状态。
+     * 库里已经有这一单时只去掉预占，不再加库存。
+     * @return false 表示 Redis 没写成功，调用方不要应答原消息
+     */
+    boolean abandonFailedCreate(Long orderId, Long userId, Long voucherId);
 
     /**
      * 数据库已经是已取消时，按订单号回补 Redis。预占如果已经换成新订单，脚本不会动它。
