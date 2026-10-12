@@ -149,6 +149,9 @@ public class SeckillOrderFlowTest {
         Assertions.assertEquals(Long.valueOf(0), runSeckill(ORDER_ID));
         Assertions.assertEquals(VoucherOrderCreateStatus.CREATED, voucherOrderService.createVoucherOrder(message(ORDER_ID)));
         voucherOrderService.markOrderCancelled(ORDER_ID);
+        Integer stockAfterCancel = currentStock();
+        voucherOrderService.markOrderCancelled(ORDER_ID);
+        Assertions.assertEquals(stockAfterCancel, currentStock());
         voucherOrderService.restoreRedisIfCancelled(ORDER_ID);
 
         Assertions.assertEquals(Long.valueOf(0), runSeckill(NEXT_ORDER_ID));
@@ -177,9 +180,42 @@ public class SeckillOrderFlowTest {
         Long orderId = Long.valueOf(String.valueOf(first.getData()));
         voucherOrderService.markOrderCancelled(orderId);
         Assertions.assertEquals(Integer.valueOf(1), normalStock());
+        voucherOrderService.markOrderCancelled(orderId);
+        Assertions.assertEquals(Integer.valueOf(1), normalStock());
         Assertions.assertNull(stringRedisTemplate.opsForHash().get("seckill:restore:" + orderId, "userId"));
         Assertions.assertEquals(0, jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM tb_seckill_voucher WHERE voucher_id = ?", Integer.class, NORMAL_VOUCHER_ID).intValue());
+    }
+
+    @Test
+    public void scannerCancelsExpiredNormalOrderOnlyOnce() {
+        jdbcTemplate.update(
+                "INSERT INTO tb_voucher (id, shop_id, title, pay_value, actual_value, type, status, stock) VALUES (?, 1, 'normal-test', 100, 100, 0, 1, 1)",
+                NORMAL_VOUCHER_ID);
+        UserDTO user = new UserDTO();
+        user.setId(USER_ID);
+        UserHolder.saveUser(user);
+        Result placed = voucherOrderService.placeOrder(NORMAL_VOUCHER_ID);
+        Assertions.assertEquals(Boolean.TRUE, placed.getSuccess());
+        Long orderId = Long.valueOf(String.valueOf(placed.getData()));
+        jdbcTemplate.update(
+                "UPDATE tb_voucher_order SET create_time = DATE_SUB(NOW(), INTERVAL 20 MINUTE) WHERE id = ?",
+                orderId);
+        Integer matched = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM tb_voucher_order WHERE id = ? AND status = 1 AND create_time <= DATE_SUB(NOW(), INTERVAL 900 SECOND)",
+                Integer.class, orderId);
+        Assertions.assertEquals(Integer.valueOf(1), matched);
+        Integer expired = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM tb_voucher_order WHERE status = 1 AND create_time <= DATE_SUB(NOW(), INTERVAL 900 SECOND)",
+                Integer.class);
+        if (expired != null && expired <= 50) {
+            Assertions.assertTrue(voucherOrderService.findExpiredUnpaidIds(50).contains(orderId));
+        }
+        voucherOrderService.markOrderCancelled(orderId);
+        Assertions.assertEquals(Integer.valueOf(1), normalStock());
+        voucherOrderService.markOrderCancelled(orderId);
+        Assertions.assertEquals(Integer.valueOf(1), normalStock());
+        Assertions.assertEquals(Integer.valueOf(4), voucherOrderService.getById(orderId).getStatus());
     }
 
     @Test

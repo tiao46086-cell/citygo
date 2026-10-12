@@ -9,9 +9,10 @@ services:
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     volumes:
       - citygo-mysql:/var/lib/mysql
-      # 只在数据目录为空时按文件名顺序执行。已有的 citygo-mysql 卷不会重跑这两份脚本。
+      # 只在数据目录为空时按文件名顺序执行。已有的 citygo-mysql 卷不会重跑这些脚本。
       - ./hmdp.sql:/docker-entrypoint-initdb.d/01-hmdp.sql:ro
-      - ./sql/citygo-demo.sql:/docker-entrypoint-initdb.d/02-citygo-demo.sql:ro
+      - ./sql/citygo-upgrade.sql:/docker-entrypoint-initdb.d/02-citygo-upgrade.sql:ro
+      - ./sql/citygo-demo.sql:/docker-entrypoint-initdb.d/03-citygo-demo.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 5s

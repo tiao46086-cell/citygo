@@ -16,6 +16,12 @@ if ($LASTEXITCODE -ne 0) { throw "mysqldump failed" }
 docker compose cp "mysql:/tmp/hmdp-backup.sql" $backupFile
 if ($LASTEXITCODE -ne 0) { throw "copy backup failed" }
 
+Write-Host "import sql/citygo-upgrade.sql"
+docker compose cp "sql/citygo-upgrade.sql" "mysql:/tmp/citygo-upgrade.sql"
+if ($LASTEXITCODE -ne 0) { throw "copy upgrade sql failed" }
+docker compose exec -T mysql sh -c "mysql -uroot -p`"`$MYSQL_ROOT_PASSWORD`" --default-character-set=utf8mb4 hmdp < /tmp/citygo-upgrade.sql"
+if ($LASTEXITCODE -ne 0) { throw "import upgrade sql failed" }
+
 Write-Host "import sql/citygo-demo.sql"
 docker compose cp "sql/citygo-demo.sql" "mysql:/tmp/citygo-demo.sql"
 if ($LASTEXITCODE -ne 0) { throw "copy demo sql failed" }

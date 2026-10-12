@@ -10,6 +10,8 @@ import javax.servlet.http.HttpServletResponse;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+import static com.hmdp.utils.RedisConstants.DEMO_SESSION_MINUTES;
+import static com.hmdp.utils.RedisConstants.DEMO_TOKEN_MARK;
 import static com.hmdp.utils.RedisConstants.LOGIN_USER_KEY;
 import static com.hmdp.utils.RedisConstants.LOGIN_USER_TTL;
 
@@ -37,8 +39,10 @@ public class RefreshTokenInterceptor implements HandlerInterceptor {
         // 3. 有用户则转回 UserDTO，存 ThreadLocal
         UserDTO userDTO = BeanUtil.fillBeanWithMap(userMap, new UserDTO(), false);
         UserHolder.saveUser(userDTO);
-        // 4. 只要来访问就续期，活跃用户 token 不会过期
-        stringRedisTemplate.expire(key, LOGIN_USER_TTL, TimeUnit.MINUTES);
+        // 4. 普通登录续 25 天。体验账号只续 2 小时，停用后名额才能回收
+        long minutes = "1".equals(String.valueOf(userMap.get(DEMO_TOKEN_MARK)))
+                ? DEMO_SESSION_MINUTES : LOGIN_USER_TTL;
+        stringRedisTemplate.expire(key, minutes, TimeUnit.MINUTES);
         return true;
     }
 

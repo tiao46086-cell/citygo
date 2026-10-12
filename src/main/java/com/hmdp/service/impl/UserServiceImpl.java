@@ -39,6 +39,8 @@ import java.util.concurrent.TimeUnit;
 
 import static com.hmdp.utils.RedisConstants.BLOG_LIKED_KEY;
 import static com.hmdp.utils.RedisConstants.DEMO_LOGIN_LIMIT_KEY;
+import static com.hmdp.utils.RedisConstants.DEMO_SESSION_MINUTES;
+import static com.hmdp.utils.RedisConstants.DEMO_TOKEN_MARK;
 import static com.hmdp.utils.RedisConstants.DEMO_USER_LOCK_KEY;
 import static com.hmdp.utils.RedisConstants.DEMO_USER_SEQ_KEY;
 import static com.hmdp.utils.RedisConstants.LOGIN_CODE_KEY;
@@ -66,8 +68,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     private static final int DEMO_USER_LIMIT = 100;
     private static final int DEMO_LOGIN_LIMIT = 10;
     private static final long DEMO_LOGIN_WINDOW_MINUTES = 10L;
-    /** 体验 token 两小时过期。空出来的名额才能交给下一位，而不是一直占到 100 个为止 */
-    private static final long DEMO_SESSION_MINUTES = 120L;
     private static final long DEMO_LOCK_WAIT_MILLIS = 1000L;
     private static final String DEMO_BUSY = "体验登录繁忙，请稍后再试";
     private static final String DEMO_FULL = "体验名额已满，请等其他体验结束后再试";
@@ -134,10 +134,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             return Result.fail("体验登录太频繁，请稍后再试");
         }
         DemoAssignment assignment = assignDemoUser();
-        if (assignment.user == null) {
+        if (assignment.token == null) {
             return Result.fail(assignment.failure);
         }
-        return Result.ok(issueToken(assignment.user, DEMO_SESSION_MINUTES));
+        return Result.ok(assignment.token);
     }
 
     private boolean allowDemoLogin(String clientIp) {
@@ -155,8 +155,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     }
 
     /**
-     * 恢复序号和分配新号在同一把锁里做完。手机号已经存在时继续取下一个，不把旧账号直接交出去。
-     * 100 个都建过之后，只回收没有登录态的账号，并先清掉它的订单。
+     * 恢复序号、分配账号、写入登录态都在同一把锁里做完。
+     * 锁放开之前 token 已经在 Redis 里，下一个请求不会把刚分出去的账号再回收。
      */
     private DemoAssignment assignDemoUser() {
         RLock lock = redissonClient.getLock(DEMO_USER_LOCK_KEY);
@@ -187,14 +187,40 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     private DemoAssignment assignDemoUserLocked() {
         User created = createFreshDemoUser();
         if (created != null) {
-            return DemoAssignment.ok(created);
+            String token = claimDemoSession(created);
+            if (token == null) {
+                return DemoAssignment.fail(DEMO_BUSY);
+            }
+            return DemoAssignment.ok(token);
         }
         User reclaimed = reclaimIdleDemoUser();
         if (reclaimed == null) {
             return DemoAssignment.fail(DEMO_FULL);
         }
+        String token = claimDemoSession(reclaimed);
+        if (token == null) {
+            return DemoAssignment.fail(DEMO_BUSY);
+        }
         log.info("体验账号交给新访客, userId={}", reclaimed.getId());
-        return DemoAssignment.ok(reclaimed);
+        return DemoAssignment.ok(token);
+    }
+
+    /**
+     * 没有登录态才写入 token。调用方如果已经拿着分配锁，这里会再入一次，放开时锁还在外层。
+     */
+    String claimDemoSession(User user) {
+        RLock lock = redissonClient.getLock(DEMO_USER_LOCK_KEY);
+        lock.lock();
+        try {
+            if (user == null || user.getId() == null || activeLoginUserIds().contains(user.getId())) {
+                return null;
+            }
+            return issueDemoToken(user);
+        } finally {
+            if (lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
+        }
     }
 
     private User createFreshDemoUser() {
@@ -313,10 +339,43 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             stringRedisTemplate.delete(BLOG_LIKED_KEY + blog.getId());
         }
         stringRedisTemplate.delete(UPLOAD_BLOG_KEY + userId);
+        clearDemoLikes(userId);
+    }
+
+    /** 只在 Redis 里真的删掉这个成员时，才把笔记点赞数减 1。数据库更新失败会把成员加回去，下次回收再试 */
+    void clearDemoLikes(Long userId) {
+        if (userId == null) {
+            return;
+        }
+        String member = userId.toString();
         ScanOptions options = ScanOptions.scanOptions().match(BLOG_LIKED_KEY + "*").count(100).build();
         try (Cursor<String> cursor = stringRedisTemplate.scan(options)) {
             while (cursor.hasNext()) {
-                stringRedisTemplate.opsForZSet().remove(cursor.next(), userId.toString());
+                String key = cursor.next();
+                if (!key.startsWith(BLOG_LIKED_KEY)) {
+                    continue;
+                }
+                long blogId;
+                try {
+                    blogId = Long.parseLong(key.substring(BLOG_LIKED_KEY.length()));
+                } catch (NumberFormatException e) {
+                    continue;
+                }
+                Long removed = stringRedisTemplate.opsForZSet().remove(key, member);
+                if (removed == null) {
+                    throw new IllegalStateException("点赞记录删除结果未知, blogId=" + blogId);
+                }
+                if (removed == 0L) {
+                    continue;
+                }
+                try {
+                    blogMapper.update(null, new UpdateWrapper<Blog>()
+                            .setSql("liked = IF(liked > 0, liked - 1, 0)")
+                            .eq("id", blogId));
+                } catch (RuntimeException e) {
+                    stringRedisTemplate.opsForZSet().add(key, member, System.currentTimeMillis());
+                    throw e;
+                }
             }
         }
     }
@@ -334,6 +393,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         return issueToken(user, LOGIN_USER_TTL);
     }
 
+    private String issueDemoToken(User user) {
+        String token = issueToken(user, DEMO_SESSION_MINUTES);
+        stringRedisTemplate.opsForHash().put(LOGIN_USER_KEY + token, DEMO_TOKEN_MARK, "1");
+        return token;
+    }
+
     private String issueToken(User user, long minutes) {
         UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
         String token = UUID.randomUUID().toString(true);
@@ -346,16 +411,16 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     }
 
     private static final class DemoAssignment {
-        private final User user;
+        private final String token;
         private final String failure;
 
-        private DemoAssignment(User user, String failure) {
-            this.user = user;
+        private DemoAssignment(String token, String failure) {
+            this.token = token;
             this.failure = failure;
         }
 
-        private static DemoAssignment ok(User user) {
-            return new DemoAssignment(user, null);
+        private static DemoAssignment ok(String token) {
+            return new DemoAssignment(token, null);
         }
 
         private static DemoAssignment fail(String failure) {

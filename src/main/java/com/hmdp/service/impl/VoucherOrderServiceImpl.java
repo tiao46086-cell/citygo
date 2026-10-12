@@ -244,8 +244,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         try {
             scheduleUnpaidCancel(orderId);
         } catch (RuntimeException e) {
-            log.error("普通订单的取消消息没有发出去, orderId={}", orderId, e);
-            throw new IllegalStateException("下单失败，请重试");
+            // 订单已经扣了库存。消息没发出去也保留，扫描器会按创建时间取消并回补
+            log.error("普通订单的取消消息没有发出去，交给扫描器, orderId={}", orderId, e);
         }
         return Result.ok(orderId.toString());
     }

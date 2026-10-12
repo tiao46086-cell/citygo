@@ -5,6 +5,9 @@ public class RedisConstants {
     public static final Long LOGIN_CODE_TTL = 2L;
     public static final String LOGIN_USER_KEY = "login:token:";
     public static final Long LOGIN_USER_TTL = 36000L;
+    /** 体验登录态在 Hash 里的标记。刷新时只续这几分钟，不续成普通登录的 25 天 */
+    public static final String DEMO_TOKEN_MARK = "demo";
+    public static final Long DEMO_SESSION_MINUTES = 120L;
     /** 体验用户序号。手机号按这个序号生成，不能走验证码登录 */
     public static final String DEMO_USER_SEQ_KEY = "demo:user:seq";
     /** 恢复序号和分配新号放在同一把锁里，避免两个访客拿到同一个账号 */
