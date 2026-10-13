@@ -17,7 +17,12 @@ local orderId = ARGV[2]
 if (redis.call('hget', holdKey, userId) ~= orderId) then
     return 0
 end
-redis.call('hdel', holdKey, userId)
+-- Lua 报错不会撤销已执行命令。先加库存，成功后再删除资格。
+-- 库存 key 丢失时不能凭一次回补重建整个活动库存。
+if redis.call('exists', stockKey) == 0 then
+    return redis.error_reply('seckill stock missing; restore retained')
+end
 redis.call('incrby', stockKey, 1)
+redis.call('hdel', holdKey, userId)
 redis.call('del', pendingKey)
 return 1

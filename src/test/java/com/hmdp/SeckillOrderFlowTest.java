@@ -365,6 +365,65 @@ public class SeckillOrderFlowTest {
         Assertions.assertEquals(Integer.valueOf(3), currentStock());
     }
 
+    @Test
+    public void stockFailureIsDurableAndLateMessageCannotCreateOrder() {
+        prepareVoucher(0);
+        prepareReservation();
+        Assertions.assertEquals(VoucherOrderCreateStatus.STOCK_FAILED,
+                voucherOrderService.createVoucherOrder(message(ORDER_ID)));
+        Assertions.assertEquals(Integer.valueOf(7), voucherOrderService.getById(ORDER_ID).getStatus());
+        Assertions.assertEquals("1", stringRedisTemplate.opsForValue().get("seckill:stock:" + VOUCHER_ID));
+        jdbcTemplate.update("UPDATE tb_seckill_voucher SET stock=1 WHERE voucher_id=?", VOUCHER_ID);
+        Assertions.assertEquals(VoucherOrderCreateStatus.TERMINATED,
+                voucherOrderService.createVoucherOrder(message(ORDER_ID)));
+        Assertions.assertEquals(Integer.valueOf(1), currentStock());
+    }
+
+    @Test
+    public void failedRestoreSurvivesRedeliveryAndRetryingPendingScan() {
+        prepareVoucher(0);
+        prepareReservation();
+        // INCR 报错，模拟回补失败；脚本必须保留 hold 和 pending。
+        stringRedisTemplate.opsForValue().set("seckill:stock:" + VOUCHER_ID, "invalid-stock");
+        Assertions.assertEquals(VoucherOrderCreateStatus.STOCK_FAILED,
+                voucherOrderService.createVoucherOrder(message(ORDER_ID)));
+        Assertions.assertEquals(VoucherOrderCreateStatus.TERMINATED,
+                voucherOrderService.createVoucherOrder(message(ORDER_ID)));
+        Assertions.assertEquals(String.valueOf(ORDER_ID), stringRedisTemplate.opsForHash()
+                .get("seckill:hold:" + VOUCHER_ID, String.valueOf(USER_ID)));
+        Assertions.assertTrue(stringRedisTemplate.hasKey("seckill:pending:" + ORDER_ID));
+        stringRedisTemplate.opsForHash().put("seckill:pending:" + ORDER_ID, "state", "retrying");
+        stringRedisTemplate.opsForValue().set("seckill:stock:" + VOUCHER_ID, "0");
+        com.hmdp.listener.SeckillPendingScheduler scheduler = new com.hmdp.listener.SeckillPendingScheduler();
+        org.springframework.test.util.ReflectionTestUtils.setField(scheduler, "stringRedisTemplate", stringRedisTemplate);
+        org.springframework.test.util.ReflectionTestUtils.setField(scheduler, "voucherOrderService", voucherOrderService);
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(scheduler, "retryOnePending", "seckill:pending:" + ORDER_ID);
+        Assertions.assertFalse(stringRedisTemplate.hasKey("seckill:pending:" + ORDER_ID));
+        Assertions.assertEquals("1", stringRedisTemplate.opsForValue().get("seckill:stock:" + VOUCHER_ID));
+        Assertions.assertTrue(voucherOrderService.abandonFailedCreate(ORDER_ID, USER_ID, VOUCHER_ID));
+        Assertions.assertEquals("1", stringRedisTemplate.opsForValue().get("seckill:stock:" + VOUCHER_ID));
+    }
+
+    @Test
+    public void restoreMarkerIsNotRemovedBeforeCancelCommit() {
+        prepareVoucher(1);
+        jdbcTemplate.update("INSERT INTO tb_voucher_order (id,user_id,voucher_id,status) VALUES (?,?,?,1)",
+                ORDER_ID, USER_ID, VOUCHER_ID);
+        stringRedisTemplate.opsForHash().put("seckill:restore:" + ORDER_ID, "nextRetryAt", "0");
+        voucherOrderService.restoreRedisIfCancelled(ORDER_ID);
+        Assertions.assertTrue(stringRedisTemplate.hasKey("seckill:restore:" + ORDER_ID));
+        voucherOrderService.markOrderCancelled(ORDER_ID);
+        voucherOrderService.restoreRedisIfCancelled(ORDER_ID);
+        Assertions.assertFalse(stringRedisTemplate.hasKey("seckill:restore:" + ORDER_ID));
+    }
+
+    private void prepareReservation() {
+        stringRedisTemplate.opsForValue().set("seckill:stock:" + VOUCHER_ID, "1");
+        stringRedisTemplate.opsForHash().put("seckill:voucher:" + VOUCHER_ID, "beginTime", "1");
+        stringRedisTemplate.opsForHash().put("seckill:voucher:" + VOUCHER_ID, "endTime", "9999999999");
+        Assertions.assertEquals(Long.valueOf(0), runSeckill(ORDER_ID));
+    }
+
     private void prepareVoucher(int stock) {
         cleanup();
         jdbcTemplate.update(

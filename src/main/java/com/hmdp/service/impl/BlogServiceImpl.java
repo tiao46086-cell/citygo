@@ -17,6 +17,8 @@ import com.hmdp.utils.UserHolder;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.redisson.api.RedissonClient;
+import org.redisson.api.RLock;
 
 import javax.annotation.Resource;
 import java.util.ArrayList;
@@ -53,6 +55,9 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     @Resource
     private BlogFavoriteMapper blogFavoriteMapper;
 
+    @Resource
+    private RedissonClient redissonClient;
+
     @Override
     public Result likeBlog(Long id) {
         if (id == null || getById(id) == null) {
@@ -64,16 +69,36 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         }
         String key = BLOG_LIKED_KEY + id;
         String member = user.getId().toString();
+        RLock lock = redissonClient.getLock("lock:blog:like:" + id + ":" + member);
+        lock.lock();
+        try {
+            return toggleLike(id, key, member);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private Result toggleLike(Long id, String key, String member) {
         Double score = stringRedisTemplate.opsForZSet().score(key, member);
         if (score == null) {
             Boolean added = stringRedisTemplate.opsForZSet().add(key, member, System.currentTimeMillis());
             if (!Boolean.TRUE.equals(added)) {
                 return Result.ok();
             }
-            boolean updated = update()
+            boolean updated;
+            try {
+                updated = update()
                     .setSql("liked = IFNULL(liked, 0) + 1")
                     .eq("id", id)
                     .update();
+            } catch (RuntimeException e) {
+                try {
+                    stringRedisTemplate.opsForZSet().remove(key, member);
+                } catch (RuntimeException compensation) {
+                    e.addSuppressed(compensation);
+                }
+                throw e;
+            }
             if (!updated) {
                 stringRedisTemplate.opsForZSet().remove(key, member);
                 return Result.fail("笔记不存在");
@@ -82,7 +107,19 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         }
         Long removed = stringRedisTemplate.opsForZSet().remove(key, member);
         if (removed != null && removed > 0) {
-            update().setSql("liked = liked - 1").eq("id", id).gt("liked", 0).update();
+            try {
+                if (!update().setSql("liked = liked - 1").eq("id", id).gt("liked", 0).update()) {
+                    stringRedisTemplate.opsForZSet().add(key, member, score);
+                    return Result.fail("点赞更新失败，请重试");
+                }
+            } catch (RuntimeException e) {
+                try {
+                    stringRedisTemplate.opsForZSet().add(key, member, score);
+                } catch (RuntimeException compensation) {
+                    e.addSuppressed(compensation);
+                }
+                throw e;
+            }
         }
         return Result.ok();
     }

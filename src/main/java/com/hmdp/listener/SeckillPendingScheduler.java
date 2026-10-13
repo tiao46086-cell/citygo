@@ -75,6 +75,13 @@ public class SeckillPendingScheduler {
             return;
         }
         Map<Object, Object> pending = stringRedisTemplate.opsForHash().entries(key);
+        Long pendingId = parseLong(key.substring(SECKILL_PENDING_KEY.length()));
+        VoucherOrder terminal = pendingId == null ? null : voucherOrderService.getById(pendingId);
+        if (terminal != null && Integer.valueOf(7).equals(terminal.getStatus())) {
+            // 即使 state 仍是 retrying，也必须恢复失败订单的 Redis 预占。
+            voucherOrderService.abandonFailedCreate(pendingId, terminal.getUserId(), terminal.getVoucherId());
+            return;
+        }
         String state = text(pending.get(PENDING_STATE_FIELD));
         if (PENDING_STATE_STOPPED.equals(state)) {
             compensateStopped(key, pending);
@@ -96,6 +103,10 @@ public class SeckillPendingScheduler {
         }
         VoucherOrder order = voucherOrderService.getById(orderId);
         if (order != null) {
+            if (Integer.valueOf(7).equals(order.getStatus())) {
+                voucherOrderService.abandonFailedCreate(orderId, order.getUserId(), order.getVoucherId());
+                return;
+            }
             stringRedisTemplate.delete(key);
             return;
         }
@@ -148,6 +159,10 @@ public class SeckillPendingScheduler {
         }
         VoucherOrder order = voucherOrderService.getById(orderId);
         if (order != null) {
+            if (Integer.valueOf(7).equals(order.getStatus())) {
+                voucherOrderService.abandonFailedCreate(orderId, order.getUserId(), order.getVoucherId());
+                return;
+            }
             stringRedisTemplate.delete(key);
             return;
         }

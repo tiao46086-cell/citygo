@@ -357,12 +357,13 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         getBaseMapper().insertUnclaimed(message.getOrderId(), message.getUserId(), message.getVoucherId());
         int claimed = getBaseMapper().claim(message.getOrderId(), ORDER_STATUS_UNPAID);
         if (claimed != 1) {
-            deletePendingAfterCommit(message.getOrderId());
             VoucherOrder existing = getById(message.getOrderId());
             if (existing != null && existing.getStatus() != null && existing.getStatus() == ORDER_STATUS_FAILED) {
+                restoreFailedAfterCommit(existing);
                 log.info("秒杀订单已终止, orderId={}", message.getOrderId());
                 return VoucherOrderCreateStatus.TERMINATED;
             }
+            deletePendingAfterCommit(message.getOrderId());
             log.info("秒杀订单已存在, orderId={}", message.getOrderId());
             return VoucherOrderCreateStatus.EXISTS;
         }
@@ -373,8 +374,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 .update();
         if (!success) {
             log.error("秒杀订单入库失败，数据库库存不足，回滚 Redis, orderId={}", message.getOrderId());
-            removeById(message.getOrderId());
-            restoreSeckill(message.getVoucherId(), message.getUserId(), message.getOrderId());
+            update().set("status", ORDER_STATUS_FAILED).eq("id", message.getOrderId()).update();
+            restoreFailedAfterCommit(getById(message.getOrderId()));
             return VoucherOrderCreateStatus.STOCK_FAILED;
         }
         scheduleUnpaidCancel(message.getOrderId());
@@ -503,13 +504,13 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             stringRedisTemplate.delete(SECKILL_PENDING_KEY + orderId);
             return true;
         }
-        Long restored = restoreSeckill(voucherId, userId, orderId);
+        Long restored = restoreSeckill(order.getVoucherId(), order.getUserId(), orderId);
         if (restored == null) {
             return false;
         }
         stringRedisTemplate.delete(SECKILL_PENDING_KEY + orderId);
         stringRedisTemplate.opsForValue().set(
-                SECKILL_FAILED_KEY + orderId, userId.toString(), SECKILL_FAILED_MINUTES, TimeUnit.MINUTES);
+                SECKILL_FAILED_KEY + orderId, order.getUserId().toString(), SECKILL_FAILED_MINUTES, TimeUnit.MINUTES);
         return true;
     }
 
@@ -521,7 +522,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         String restoreKey = SECKILL_RESTORE_KEY + orderId;
         VoucherOrder order = getById(orderId);
         if (order == null || order.getStatus() == null || order.getStatus() != ORDER_STATUS_CANCELLED) {
-            stringRedisTemplate.delete(restoreKey);
+            // 标记可能先于 SQL 提交被扫描到，保留它等待下一轮。
             return;
         }
         if (!isSeckillVoucher(order.getVoucherId())) {
@@ -621,6 +622,27 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             @Override
             public void afterCommit() {
                 stringRedisTemplate.delete(key);
+            }
+        });
+    }
+
+    /** SQL 提交后才释放资格；失败时 pending 仍在，扫描器可按数据库终态继续回补。 */
+    private void restoreFailedAfterCommit(VoucherOrder order) {
+        Runnable restore = () -> {
+            try {
+                self.abandonFailedCreate(order.getId(), order.getUserId(), order.getVoucherId());
+            } catch (RuntimeException e) {
+                log.error("失败订单回补未完成，保留 pending 重试, orderId={}", order.getId(), e);
+            }
+        };
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            restore.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                restore.run();
             }
         });
     }

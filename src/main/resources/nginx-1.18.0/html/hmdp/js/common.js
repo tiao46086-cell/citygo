@@ -34,23 +34,15 @@ axios.interceptors.response.use(function (response) {
   return Promise.reject("服务器异常");
 });
 axios.defaults.paramsSerializer = function(params) {
-  let p = "";
-  Object.keys(params).forEach(k => {
-    if(params[k]){
-      p = p + "&" + k + "=" + params[k]
-    }
-  })
-  return p;
+  return Object.keys(params)
+    .filter(k => params[k] !== null && params[k] !== undefined)
+    .map(k => encodeURIComponent(k) + "=" + encodeURIComponent(params[k]))
+    .join("&");
 }
 const util = {
   commonURL,
   getUrlParam(name) {
-    let reg = new RegExp("(^|&)" + name + "=([^&]*)(&|$)", "i");
-    let r = window.location.search.substr(1).match(reg);
-    if (r != null) {
-      return decodeURI(r[2]);
-    }
-    return "";
+    return new URLSearchParams(window.location.search).get(name) || "";
   },
   formatPrice(val) {
     if (typeof val === 'string') {

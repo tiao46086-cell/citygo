@@ -4,7 +4,19 @@
 -- 经纬度是广州各区附近的示意点，不是真实门店。地址是虚构的。
 -- 图片是可自由使用的场景照片，放在页面目录 imgs/demo/，不是这些虚构店的实拍。
 
+-- Docker 初始化每份 SQL 都会新建 mysql 连接，不能依赖基础 SQL 的 SET NAMES。
+SET NAMES utf8mb4;
 USE hmdp;
+
+-- 去掉基础 SQL 中两篇重复骑马笔记；编号、作者和标题同时匹配才清理，保留用户修改后的笔记。
+START TRANSACTION;
+DELETE c FROM tb_blog_comments c JOIN tb_blog b ON b.id = c.blog_id
+WHERE b.id IN (6, 7) AND b.user_id = 1 AND b.title = '杭州周末好去处｜💰50就可以骑马啦🐎';
+DELETE f FROM tb_blog_favorite f JOIN tb_blog b ON b.id = f.blog_id
+WHERE b.id IN (6, 7) AND b.user_id = 1 AND b.title = '杭州周末好去处｜💰50就可以骑马啦🐎';
+DELETE FROM tb_blog
+WHERE id IN (6, 7) AND user_id = 1 AND title = '杭州周末好去处｜💰50就可以骑马啦🐎';
+COMMIT;
 
 UPDATE tb_shop
 SET name = '巷里咖啡',

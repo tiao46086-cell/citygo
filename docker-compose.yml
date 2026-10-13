@@ -60,6 +60,7 @@ services:
       CITYGO_RABBITMQ_PASSWORD: ${CITYGO_RABBITMQ_PASSWORD:-citygo}
       CITYGO_UPLOAD_DIR: /data/imgs
       CITYGO_ADMIN_USER_IDS: ${CITYGO_ADMIN_USER_IDS:-}
+      CITYGO_DEMO_SECKILL_INIT: "true"
       LOGGING_CHARSET_CONSOLE: UTF-8
     depends_on:
       mysql:

@@ -143,9 +143,9 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     }
 
     /**
-     * LocalDateTime 没有时区。按 JVM 默认时区换成「从 1970-01-01 起的秒数」，Lua 才能和 Redis 的 TIME 比较。
+     * LocalDateTime 没有时区。活动时间固定按北京时间解释，不依赖 JVM 所在机器。
      */
     private long toEpochSecond(LocalDateTime time) {
-        return time.atZone(ZoneId.systemDefault()).toEpochSecond();
+        return time.atZone(ZoneId.of("Asia/Shanghai")).toEpochSecond();
     }
 }

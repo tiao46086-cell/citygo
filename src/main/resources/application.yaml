@@ -36,6 +36,8 @@ spring:
   jackson:
     default-property-inclusion: non_null # JSON处理时忽略非空字段
 citygo:
+  # Compose 首次启动可初始化空白演示券；本机默认关闭，绝不覆盖现存 Redis 库存。
+  demo-seckill-init: ${CITYGO_DEMO_SECKILL_INIT:false}
   # 图片目录。不设环境变量时用项目里自带的页面图片
   upload-dir: ${CITYGO_UPLOAD_DIR:src/main/resources/nginx-1.18.0/html/hmdp/imgs}
   # 逗号分隔的用户 id。空表示不能新增或修改商户，也不能发券
