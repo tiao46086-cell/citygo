@@ -8,7 +8,7 @@ const context = {
   window: { location: { search: '' } }, URLSearchParams
 };
 vm.createContext(context);
-vm.runInContext(fs.readFileSync('src/main/resources/nginx-1.18.0/html/hmdp/js/common.js', 'utf8'), context);
+vm.runInContext(fs.readFileSync('src/main/resources/nginx-1.18.0/html/citygo/js/common.js', 'utf8'), context);
 for (const keyword of ['咖啡&茶', 'A+B #/店', '50%折扣', '普通搜索']) {
   const query = context.axios.defaults.paramsSerializer({ name: keyword, current: 0, active: false, absent: null });
   const params = new URLSearchParams(query);

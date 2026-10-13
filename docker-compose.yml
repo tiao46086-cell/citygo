@@ -10,7 +10,7 @@ services:
     volumes:
       - citygo-mysql:/var/lib/mysql
       # 只在数据目录为空时按文件名顺序执行。已有的 citygo-mysql 卷不会重跑这些脚本。
-      - ./hmdp.sql:/docker-entrypoint-initdb.d/01-hmdp.sql:ro
+      - ./citygo.sql:/docker-entrypoint-initdb.d/01-citygo.sql:ro
       - ./sql/citygo-upgrade.sql:/docker-entrypoint-initdb.d/02-citygo-upgrade.sql:ro
       - ./sql/citygo-demo.sql:/docker-entrypoint-initdb.d/03-citygo-demo.sql:ro
     healthcheck:
@@ -70,14 +70,14 @@ services:
       rabbitmq:
         condition: service_healthy
     volumes:
-      - ./src/main/resources/nginx-1.18.0/html/hmdp/imgs:/data/imgs
+      - ./src/main/resources/nginx-1.18.0/html/citygo/imgs:/data/imgs
 
   nginx:
     image: nginx:1.27
     ports:
       - "8080:80"
     volumes:
-      - ./src/main/resources/nginx-1.18.0/html/hmdp:/usr/share/nginx/html:ro
+      - ./src/main/resources/nginx-1.18.0/html/citygo:/usr/share/nginx/html:ro
       - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - app

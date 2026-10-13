@@ -6,14 +6,16 @@ CityGo 基于黑马点评学习项目，目标是完成 **v1.0**：理解原有�
 
 协作规则见根目录 `AGENTS.md`：先解释再修改，较大修改先确认，从 Java 基础语法讲解，一次推进可理解的一小块。
 
-本次代码核对日期：2026-10-12（北京时间）。核对时的状态：
+本次代码核对日期：2026-10-13（北京时间）。核对时的状态：
 
 - 绝对路径：`D:\citygo\hmdp`；Git 分支：`citygo-dev`。
-- 提交：`1a4d530f6f98ac8f195ecef0661a217512cb83e2`。
-- 说明：让秒杀的创建和终止抢同一行，失败后再投递不再扣库存。
-- 提交时间：2026-10-12 18:06:32 +08:00。
+- 迁移前提交：`eb6eaf19ce268e0f3d391fb0225372d895c9f6c0`；命名迁移提交以 Git 实际状态为准。
+- 说明：v1.0 订单补偿修复和容器部署验收。
+- 提交时间：2026-10-13 09:46:12 +08:00。
 
-这是核对快照，不是未来会话的实时状态。继续工作时检查实际 Git 状态；以代码、SQL、配置、测试和运行报告为事实来源，旧 Phase 总结不能覆盖这些证据。后续经确认进行了 v1.0 修复，改动尚未提交；本轮实际测试和构建记录见第 10 节，尚未部署。
+这是核对快照，不是未来会话的实时状态。继续工作时检查实际 Git 状态；以代码、SQL、配置、测试和运行报告为事实来源，旧 Phase 总结不能覆盖这些证据。
+
+2026-10-13 完成项目命名迁移：Java 包和源码测试目录为 `com.citygo`，页面目录为 `html/citygo`，基础 SQL 为 `citygo.sql`，应用名、Compose 挂载和 Nginx root 与之对应。为兼容已有数据，数据库名仍为 `hmdp`，本地工作目录仍为 `D:\citygo\hmdp`；脚本备份文件名也改为 `citygo-*.sql`。这次是命名和引用迁移，不是新业务功能。
 
 ## 2. 功能来源与当前范围
 
@@ -43,7 +45,7 @@ CityGo 基于黑马点评学习项目，目标是完成 **v1.0**：理解原有�
 - Caffeine：商户详情本地缓存，版本由 Spring Boot 依赖管理。
 - Docker/Compose、Nginx；前端沿用课程 Vue/Element/axios 基础并改造。
 
-应用名 `citygo`，启动类 `CityGoApplication`，包名 `com.hmdp`，库名 `hmdp`，应用端口 8081，Maven 版本 `1.0-SNAPSHOT`。配置在 `src/main/resources/application.yaml`。
+应用名 `citygo`，启动类 `CityGoApplication`，包名 `com.citygo`，库名 `hmdp`，应用端口 8081，Maven 版本 `1.0-SNAPSHOT`。配置在 `src/main/resources/application.yaml`。
 
 不主动引入 Elasticsearch、Spring Cloud、Dubbo、Kafka、RocketMQ、分库分表、XXL-JOB、Canal、Sentinel、Kubernetes 等。已有 Caffeine、Docker、Nginx 不意味着继续扩展技术栈。
 
@@ -148,7 +150,7 @@ CityGo 基于黑马点评学习项目，目标是完成 **v1.0**：理解原有�
 
 运行步骤见 `README.md`。以下配置已进行本机独立 Compose 验收，具体覆盖与边界见 `deploy/V1_CONTAINER_ACCEPTANCE.md`，不等于公网部署通过。
 
-- 新建库按 `hmdp.sql` → `sql/citygo-upgrade.sql` 执行，需要演示数据再执行 `sql/citygo-demo.sql`。三份脚本分别声明 `SET NAMES utf8mb4`，避免 Docker 每份脚本独立连接导致演示中文乱码。升级脚本按列存在性增加普通券 stock 和 demo_order_after，可独立用于已有库。只导入基础 SQL 不满足当前实现。
+- 新建库按 `citygo.sql` → `sql/citygo-upgrade.sql` 执行，需要演示数据再执行 `sql/citygo-demo.sql`。三份脚本分别声明 `SET NAMES utf8mb4`，避免 Docker 每份脚本独立连接导致演示中文乱码。升级脚本按列存在性增加普通券 stock 和 demo_order_after，可独立用于已有库。只导入基础 SQL 不满足当前实现。
 - 演示数据为广州虚构商户/笔记，坐标是示意点，图片不是虚构门店实拍；填普通券初始库存，插入秒杀券 10。
 - 演示 SQL 不自动写 Redis。`DemoSeckillInitializer` 由 `CITYGO_DEMO_SECKILL_INIT=true` 开启（本机默认关闭、Compose 开启）：只初始化上架秒杀券 10，要求 SQL 库存仍为初始 20、无历史订单，且 Redis stock/time/hold/旧资格全部不存在。Lua 原子检查并写入，不覆盖现存或部分数据；不用于已有活动丢失 Redis 后的恢复。活动时间固定按 `Asia/Shanghai` 转 epoch，不依赖 JVM 默认时区。
 - Dockerfile 使用 Maven/Java 8 构建、Java 8 JRE 运行，启动固定 `-Duser.timezone=Asia/Shanghai`；`maven.test.skip=true` 跳过测试，镜像构建不证明测试通过。
@@ -186,7 +188,9 @@ AdminGuardTest、BlogLikeFailureTest 为单元测试；SeckillLuaTest 和部分 
 
 ## 11. v1.0 收尾与对外描述
 
-本机容器验收于 2026-10-12 23:44:58 完成：真实等待约 900 秒，由 Rabbit 取消监听器消费延迟死信消息，SQL/Redis 库存和购买资格恢复；取消后重抢经 MQ 入库并模拟支付通过。与普通订单前移时间的扫描检查分别记录，不混淆真实 TTL 和加速测试。空库中文乱码已用 SQL 显式 SET NAMES 修复并重新初始化验证。详见 `deploy/V1_CONTAINER_ACCEPTANCE.md`。当前可以作为 v1.0 正式部署候选，尚未完成公网验收、提交或标签发布。
+2026-10-13 命名迁移后的验证：Java 21 执行 `mvn -B -Dstyle.color=never -DforkCount=0 test`，在独立 Docker MySQL（宿主 `13306`）、Redis（`6379`）和 RabbitMQ 环境中 41 项全部通过；独立库预置了测试代码所需的用户 1013、1014，不能据此推断生产库包含这些用户。Node 参数测试 5 组通过。Java 8 Dockerfile 镜像构建成功；新包名应用和 `html/citygo` 页面启动后，首页、静态资源、图片、商户/分类/券查询、体验登录、普通下单、秒杀消息入库、模拟支付、退出共 13 项 HTTP 检查通过。旧数据库名 `hmdp`、旧数据卷未迁移或删除。
+
+本机容器验收于 2026-10-12 23:44:58 完成：真实等待约 900 秒，由 Rabbit 取消监听器消费延迟死信消息，SQL/Redis 库存和购买资格恢复；取消后重抢经 MQ 入库并模拟支付通过。与普通订单前移时间的扫描检查分别记录，不混淆真实 TTL 和加速测试。空库中文乱码已用 SQL 显式 SET NAMES 修复并重新初始化验证。详见 `deploy/V1_CONTAINER_ACCEPTANCE.md`。当前可以作为 v1.0 正式部署候选，修复已提交并推送 GitHub；尚未完成公网验收或标签发布。
 
 当前范围有实现代码，运行验证与验收状态需另行记录。后续只围绕已有范围核对运行、修复经确认的问题、补必要验证和讲解；已知缺口不是自动授权的新任务。
 

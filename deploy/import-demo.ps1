@@ -8,12 +8,12 @@ Set-Location $root
 $backupDir = Join-Path $root "backup"
 New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$backupFile = Join-Path $backupDir "hmdp-$stamp.sql"
+$backupFile = Join-Path $backupDir "citygo-$stamp.sql"
 
 Write-Host "backup mysql to $backupFile"
-docker compose exec -T mysql sh -c "mysqldump -uroot -p`"`$MYSQL_ROOT_PASSWORD`" --single-transaction --default-character-set=utf8mb4 hmdp > /tmp/hmdp-backup.sql"
+docker compose exec -T mysql sh -c "mysqldump -uroot -p`"`$MYSQL_ROOT_PASSWORD`" --single-transaction --default-character-set=utf8mb4 hmdp > /tmp/citygo-backup.sql"
 if ($LASTEXITCODE -ne 0) { throw "mysqldump failed" }
-docker compose cp "mysql:/tmp/hmdp-backup.sql" $backupFile
+docker compose cp "mysql:/tmp/citygo-backup.sql" $backupFile
 if ($LASTEXITCODE -ne 0) { throw "copy backup failed" }
 
 Write-Host "import sql/citygo-upgrade.sql"

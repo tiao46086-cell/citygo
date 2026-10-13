@@ -23,9 +23,13 @@
 
 没有做：评分、关注 Feed、GEO、签到、Elasticsearch、压测数字、真实支付。上面这些做完后，功能范围先停在这里。
 
+源码包名为 `com.citygo`，页面目录为 `src/main/resources/nginx-1.18.0/html/citygo`，基础脚本为 `citygo.sql`。数据库名仍为 `hmdp`，保留已有数据兼容；本地工作目录名不影响构建。`deploy/import-demo.ps1` 新生成的备份文件以 `citygo-` 开头。
+
+从旧目录版本更新后，用原来的 Compose 项目名执行 `docker compose up -d --build`，让容器按新路径重建挂载；只执行 `docker start` 会沿用旧路径。保留原项目名及数据卷，不执行 `down -v`。
+
 ## 本地运行
 
-需要 Java 8、Maven、本机 MySQL（库名 `hmdp`）、Redis，以及 RabbitMQ。新建库先导入 `hmdp.sql`，再执行 `sql/citygo-upgrade.sql` 增加普通券库存和体验订单分界列；需要演示数据再执行 `sql/citygo-demo.sql`。已有库不要重新导入含 DROP TABLE 的基础 SQL，可单独执行升级脚本。只把 RabbitMQ 放进 Docker 时：
+需要 Java 8、Maven、本机 MySQL（库名 `hmdp`）、Redis，以及 RabbitMQ。新建库先导入 `citygo.sql`，再执行 `sql/citygo-upgrade.sql` 增加普通券库存和体验订单分界列；需要演示数据再执行 `sql/citygo-demo.sql`。已有库不要重新导入含 DROP TABLE 的基础 SQL，可单独执行升级脚本。只把 RabbitMQ 放进 Docker 时：
 
 ```text
 docker run -d --name citygo-rabbitmq -p 5672:5672 -p 15672:15672 -e RABBITMQ_DEFAULT_USER=citygo -e RABBITMQ_DEFAULT_PASS=citygo rabbitmq:3-management
@@ -33,7 +37,7 @@ docker run -d --name citygo-rabbitmq -p 5672:5672 -p 15672:15672 -e RABBITMQ_DEF
 
 整套用 Compose 启动时，MySQL、Redis、RabbitMQ 和应用在同一个网络里，页面由 Nginx 提供，地址是 http://127.0.0.1:8080 。这套不映射 3306、6379、5672，本机原来的数据库和队列可以继续留着。8080 如果已经被本机 Nginx 占用，要先停掉那个进程。Redis 打开 AOF，RabbitMQ 固定节点名 `rabbit@citygo-rabbitmq`，三者都用命名卷。
 
-新的空 MySQL 卷会先导入 `hmdp.sql`，再执行 `sql/citygo-upgrade.sql` 补上普通券库存列和体验账号的订单分界，然后导入 `sql/citygo-demo.sql`。已经存在的 `citygo-mysql` 卷不会重跑初始化。要给已有库换上广州演示数据，运行 `deploy/import-demo.ps1`：先备份到 `backup/`，再执行升级脚本和演示脚本，删掉 Redis 里的商户缓存，并重启应用以清掉本机 Caffeine。不要删除 `citygo-mysql` 卷。结构升级不依赖演示数据，也可以单独执行 `sql/citygo-upgrade.sql`。
+新的空 MySQL 卷会先导入 `citygo.sql`，再执行 `sql/citygo-upgrade.sql` 补上普通券库存列和体验账号的订单分界，然后导入 `sql/citygo-demo.sql`。已经存在的 `citygo-mysql` 卷不会重跑初始化。要给已有库换上广州演示数据，运行 `deploy/import-demo.ps1`：先备份到 `backup/`，再执行升级脚本和演示脚本，删掉 Redis 里的商户缓存，并重启应用以清掉本机 Caffeine。不要删除 `citygo-mysql` 卷。结构升级不依赖演示数据，也可以单独执行 `sql/citygo-upgrade.sql`。
 
 ```text
 docker compose up -d --build
@@ -53,7 +57,7 @@ docker compose up -d --build
 mvn spring-boot:run
 ```
 
-本机启动时应用端口 8081。静态页面在 `src/main/resources/nginx-1.18.0/html/hmdp`，底子是黑马点评课程页面。这里改了名称，页面换成统一样式，演示商户和笔记换成广州数据，并接上评论、收藏、我的订单和模拟支付。页面请求走相对路径 `/api`，不写死后端地址。`nginx-1.18.0/conf/nginx.conf` 给 Windows 上的 `nginx.exe` 用，把 `/api` 转到本机 8081。Compose 用的是 `deploy/nginx.conf`，转到容器里的应用。
+本机启动时应用端口 8081。静态页面在 `src/main/resources/nginx-1.18.0/html/citygo`，底子是黑马点评课程页面。这里改了名称，页面换成统一样式，演示商户和笔记换成广州数据，并接上评论、收藏、我的订单和模拟支付。页面请求走相对路径 `/api`，不写死后端地址。`nginx-1.18.0/conf/nginx.conf` 给 Windows 上的 `nginx.exe` 用，把 `/api` 转到本机 8081。Compose 用的是 `deploy/nginx.conf`，转到容器里的应用。
 
 改 `citygo.seckill.unpaid-timeout` 之前，要先删掉 RabbitMQ 里的 `seckill.order.delay`，否则启动会报队列参数不一致。
 
