@@ -5,7 +5,7 @@ spring:
     name: citygo
   datasource:
     driver-class-name: com.mysql.jdbc.Driver
-    url: jdbc:mysql://${CITYGO_DB_HOST:127.0.0.1}:${CITYGO_DB_PORT:3306}/hmdp?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://${CITYGO_DB_HOST:127.0.0.1}:${CITYGO_DB_PORT:3306}/citygo?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
     username: ${CITYGO_DB_USERNAME:root}
     password: ${CITYGO_DB_PASSWORD:1234}
   redis:

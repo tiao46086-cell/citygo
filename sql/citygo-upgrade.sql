@@ -1,7 +1,7 @@
 -- 结构升级。不写演示商户、笔记或库存数量，可以单独在已有库上执行。
 -- 普通券库存放在 tb_voucher.stock。秒杀券库存仍在 tb_seckill_voucher，这一列保持空。
 SET NAMES utf8mb4;
-USE hmdp;
+USE citygo;
 
 SET @citygo_voucher_stock := (
   SELECT COUNT(*) FROM information_schema.COLUMNS

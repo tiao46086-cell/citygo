@@ -23,13 +23,13 @@
 
 没有做：评分、关注 Feed、GEO、签到、Elasticsearch、压测数字、真实支付。上面这些做完后，功能范围先停在这里。
 
-源码包名为 `com.citygo`，页面目录为 `src/main/resources/nginx-1.18.0/html/citygo`，基础脚本为 `citygo.sql`。数据库名仍为 `hmdp`，保留已有数据兼容；本地工作目录名不影响构建。`deploy/import-demo.ps1` 新生成的备份文件以 `citygo-` 开头。
+源码包名为 `com.citygo`，页面目录为 `src/main/resources/nginx-1.18.0/html/citygo`，基础脚本为 `citygo.sql`。当前默认数据库名为 `citygo`；本地工作目录名不影响构建。`deploy/import-demo.ps1` 新生成的备份文件以 `citygo-` 开头。
 
-从旧目录版本更新后，用原来的 Compose 项目名执行 `docker compose up -d --build`，让容器按新路径重建挂载；只执行 `docker start` 会沿用旧路径。保留原项目名及数据卷，不执行 `down -v`。
+当前 Compose 项目名固定为 `citygo`。旧部署升级前需要备份并将原数据库复制到 `citygo`，核对表、行数和业务数据，同时迁移或显式复用原数据卷。直接用新项目名启动会创建新卷，不能当作旧部署的数据迁移；不要执行 `down -v`。
 
 ## 本地运行
 
-需要 Java 8、Maven、本机 MySQL（库名 `hmdp`）、Redis，以及 RabbitMQ。新建库先导入 `citygo.sql`，再执行 `sql/citygo-upgrade.sql` 增加普通券库存和体验订单分界列；需要演示数据再执行 `sql/citygo-demo.sql`。已有库不要重新导入含 DROP TABLE 的基础 SQL，可单独执行升级脚本。只把 RabbitMQ 放进 Docker 时：
+需要 Java 8、Maven、本机 MySQL（库名 `citygo`）、Redis，以及 RabbitMQ。新建库先导入 `citygo.sql`，再执行 `sql/citygo-upgrade.sql` 增加普通券库存和体验订单分界列；需要演示数据再执行 `sql/citygo-demo.sql`。已有库不要重新导入含 DROP TABLE 的基础 SQL，可单独执行升级脚本。只把 RabbitMQ 放进 Docker 时：
 
 ```text
 docker run -d --name citygo-rabbitmq -p 5672:5672 -p 15672:15672 -e RABBITMQ_DEFAULT_USER=citygo -e RABBITMQ_DEFAULT_PASS=citygo rabbitmq:3-management

@@ -1,11 +1,12 @@
 # 一台机器上的页面和后端。MySQL、Redis、RabbitMQ 只在这个网络里，不占用本机已有端口。
 # 页面在 http://127.0.0.1:8080 。本机用 mvn spring-boot:run 时不用起这套。
+name: citygo
 services:
   mysql:
     image: mysql:8.0.34
     environment:
       MYSQL_ROOT_PASSWORD: ${CITYGO_DB_PASSWORD:-1234}
-      MYSQL_DATABASE: hmdp
+      MYSQL_DATABASE: citygo
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     volumes:
       - citygo-mysql:/var/lib/mysql

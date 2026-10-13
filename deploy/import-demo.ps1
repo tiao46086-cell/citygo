@@ -11,7 +11,7 @@ $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $backupFile = Join-Path $backupDir "citygo-$stamp.sql"
 
 Write-Host "backup mysql to $backupFile"
-docker compose exec -T mysql sh -c "mysqldump -uroot -p`"`$MYSQL_ROOT_PASSWORD`" --single-transaction --default-character-set=utf8mb4 hmdp > /tmp/citygo-backup.sql"
+docker compose exec -T mysql sh -c "mysqldump -uroot -p`"`$MYSQL_ROOT_PASSWORD`" --single-transaction --default-character-set=utf8mb4 citygo > /tmp/citygo-backup.sql"
 if ($LASTEXITCODE -ne 0) { throw "mysqldump failed" }
 docker compose cp "mysql:/tmp/citygo-backup.sql" $backupFile
 if ($LASTEXITCODE -ne 0) { throw "copy backup failed" }
@@ -19,13 +19,13 @@ if ($LASTEXITCODE -ne 0) { throw "copy backup failed" }
 Write-Host "import sql/citygo-upgrade.sql"
 docker compose cp "sql/citygo-upgrade.sql" "mysql:/tmp/citygo-upgrade.sql"
 if ($LASTEXITCODE -ne 0) { throw "copy upgrade sql failed" }
-docker compose exec -T mysql sh -c "mysql -uroot -p`"`$MYSQL_ROOT_PASSWORD`" --default-character-set=utf8mb4 hmdp < /tmp/citygo-upgrade.sql"
+docker compose exec -T mysql sh -c "mysql -uroot -p`"`$MYSQL_ROOT_PASSWORD`" --default-character-set=utf8mb4 citygo < /tmp/citygo-upgrade.sql"
 if ($LASTEXITCODE -ne 0) { throw "import upgrade sql failed" }
 
 Write-Host "import sql/citygo-demo.sql"
 docker compose cp "sql/citygo-demo.sql" "mysql:/tmp/citygo-demo.sql"
 if ($LASTEXITCODE -ne 0) { throw "copy demo sql failed" }
-docker compose exec -T mysql sh -c "mysql -uroot -p`"`$MYSQL_ROOT_PASSWORD`" --default-character-set=utf8mb4 hmdp < /tmp/citygo-demo.sql"
+docker compose exec -T mysql sh -c "mysql -uroot -p`"`$MYSQL_ROOT_PASSWORD`" --default-character-set=utf8mb4 citygo < /tmp/citygo-demo.sql"
 if ($LASTEXITCODE -ne 0) { throw "import demo sql failed" }
 
 Write-Host "delete shop cache"

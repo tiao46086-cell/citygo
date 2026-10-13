@@ -6,7 +6,7 @@
 
 -- Docker 初始化每份 SQL 都会新建 mysql 连接，不能依赖基础 SQL 的 SET NAMES。
 SET NAMES utf8mb4;
-USE hmdp;
+USE citygo;
 
 -- 去掉基础 SQL 中两篇重复骑马笔记；编号、作者和标题同时匹配才清理，保留用户修改后的笔记。
 START TRANSACTION;
