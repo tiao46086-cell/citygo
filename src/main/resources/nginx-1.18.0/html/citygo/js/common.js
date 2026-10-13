@@ -4,6 +4,7 @@ axios.defaults.baseURL = commonURL;
 axios.defaults.timeout = 5000;
 // request拦截器，将用户token放入头中
 let token = sessionStorage.getItem("token");
+let loginRedirecting = false;
 axios.interceptors.request.use(
   config => {
     if(token) config.headers['authorization'] = token
@@ -24,10 +25,13 @@ axios.interceptors.response.use(function (response) {
   // 一般是服务端异常或者网络异常
   console.log(error)
   if(error.response && error.response.status == 401){
-    // 未登录，跳转
-    setTimeout(() => {
-      location.href = "/login.html"
-    }, 200);
+    // 替换无权访问的页面，返回时不会再次进入它。
+    sessionStorage.removeItem("token");
+    token = null;
+    if (!loginRedirecting && window.location.pathname !== "/login.html") {
+      loginRedirecting = true;
+      window.location.replace("/login.html");
+    }
     return Promise.reject("请先登录");
   }
   return Promise.reject("服务器异常");

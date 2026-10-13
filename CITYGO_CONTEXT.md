@@ -2,6 +2,8 @@
 
 ## 1. 目标、协作与核对基准
 
+2026-10-13 最终本地发布候选核对：当前工作区绝对路径为 `D:\citygo\hmdp`，分支以 Git 实际状态为准；Java 41 项、Node 3 个脚本和独立 Compose 40 项 HTTP 检查通过。公网服务器、域名和 HTTPS 尚未提供，不能标记公网上线。
+
 CityGo 基于黑马点评学习项目，目标是完成 **v1.0**：理解原有实现，完成当前业务范围的工程化改造，并能独立解释调用链和取舍。不再规划 v1.1，不主动增加技术栈。已有代码不等于已验证，也不等于 v1.0 已验收完成。
 
 协作规则见根目录 `AGENTS.md`：先解释再修改，较大修改先确认，从 Java 基础语法讲解，一次推进可理解的一小块。
@@ -187,6 +189,8 @@ AdminGuardTest、BlogLikeFailureTest 为单元测试；SeckillLuaTest 和部分 
 已确认本机 Docker Desktop 4.94.0、Docker Engine 29.8.2、Compose v5.5.1 可用；此前命令不可访问是沙箱权限限制，不是未安装。之后实际完成 Java 8 镜像构建/运行、全新 Compose 初始化、36 项 HTTP 功能检查、完整服务重启及补充中文/图片/并发/退出检查；真实 MQ 消费者和定时扫描开启，普通订单扫描兜底已触发。浏览器查看首页、中文搜索正常。具体证据见 `deploy/V1_CONTAINER_ACCEPTANCE.md`。仍未覆盖所有页面操作、MQ 故障注入、所有 Lua 时间/限流分支，未验收公网域名/HTTPS；没有性能数据。上线验收步骤见 `deploy/V1_RELEASE_CHECKLIST.md`。
 
 ## 11. v1.0 收尾与对外描述
+
+登录返回修复：公共拦截器遇到 401 清理失效 token，通过 location.replace 替换无权访问的页面，并防止重复跳转和登录页自跳转；个人页不再额外跳转，请求失败结束加载并提示错误。未登录访问“我的”仍进入登录页，没有新增游客个人页。各页面 common.js 版本升至 9。Node 执行 `src/test/js/login-navigation.test.js`，使用实际拦截器与个人页脚本验证 401、重复 401、登录页和 500 错误分支，模拟历史记录返回一步到首页；原参数测试 5 组也通过。此为脚本验证，未进行本次真实浏览器返回缓存或容器端到端验收。
 
 2026-10-13 经确认完成五项小残留清理：登录 Controller、Service 接口与实现不再传递未使用的 HttpSession；删除 UserController 未使用的日志注解、common.js 旧 IP 注释、Windows Nginx 未使用的 upstream backend 和默认欢迎页 html/index.html。实际代理仍指向本机 8081，html/citygo 首页与 50x 错误页保留。11:39:29 在 Java 21、独立 citygo 测试库（13306）和 Redis（6379）上执行 `mvn -B -Dstyle.color=never -DforkCount=0 test`，41 项通过；MQ 自动消费与调度按原测试配置关闭。Node 参数测试 5 组通过，项目自带 Windows nginx.exe 的 `-t` 配置检查通过；本次未做 HTTP 登录或容器端到端验收。日志 `target/cleanup-small-tests.log`。
 

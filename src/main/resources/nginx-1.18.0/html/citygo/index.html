@@ -42,7 +42,8 @@
         <div>
           <div class="cg-shop-name">{{s.name}}</div>
           <div class="cg-meta">{{typeName(s.typeId)}}<span v-if="s.area"> · {{s.area}}</span></div>
-          <div class="cg-meta">人均 ¥{{s.avgPrice || "-"}}<span v-if="s.openHours"> · {{s.openHours}}</span></div>
+          <div class="cg-meta">人均 ¥{{s.avgPrice || "-"}}</div>
+          <div v-if="s.openHours" class="cg-meta">{{s.openHours}}</div>
         </div>
       </article>
     </div>
@@ -71,7 +72,7 @@
 <script src="./js/vue.js"></script>
 <script src="./js/axios.min.js"></script>
 <script src="./js/element.js"></script>
-<script src="./js/common.js?v=8"></script>
+<script src="./js/common.js?v=9"></script>
 <script src="./js/footer.js?v=7"></script>
 <script>
   const app = new Vue({

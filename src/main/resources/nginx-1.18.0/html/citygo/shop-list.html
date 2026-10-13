@@ -41,7 +41,7 @@
 <script src="./js/vue.js"></script>
 <script src="./js/axios.min.js"></script>
 <script src="./js/element.js"></script>
-<script src="./js/common.js?v=4"></script>
+<script src="./js/common.js?v=9"></script>
 <script>
   const app = new Vue({
     el: "#app",
@@ -105,7 +105,7 @@
         location.href = "/shop-list.html?type=" + t.id + "&name=" + t.name;
       },
       goBack() {
-        history.back();
+        location.href = "/";
       },
       toDetail(id) {
         location.href = "/shop-detail.html?id=" + id;

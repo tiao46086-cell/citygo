@@ -37,3 +37,8 @@ src/main/resources/nginx-1.18.0/logs/
 
 ### database backups from deploy/import-demo.ps1 ###
 backup/
+
+# Local deployment credentials
+.env
+.env.*
+!.env.example

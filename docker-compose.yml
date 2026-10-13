@@ -3,6 +3,7 @@
 name: citygo
 services:
   mysql:
+    restart: unless-stopped
     image: mysql:8.0.34
     environment:
       MYSQL_ROOT_PASSWORD: ${CITYGO_DB_PASSWORD:-1234}
@@ -21,6 +22,7 @@ services:
       retries: 30
 
   redis:
+    restart: unless-stopped
     image: redis:7.2
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
@@ -32,6 +34,7 @@ services:
       retries: 20
 
   rabbitmq:
+    restart: unless-stopped
     image: rabbitmq:3.13-management
     hostname: citygo-rabbitmq
     environment:
@@ -47,6 +50,7 @@ services:
       retries: 20
 
   app:
+    restart: unless-stopped
     build: .
     environment:
       CITYGO_DB_HOST: mysql
@@ -74,6 +78,7 @@ services:
       - ./src/main/resources/nginx-1.18.0/html/citygo/imgs:/data/imgs
 
   nginx:
+    restart: unless-stopped
     image: nginx:1.27
     ports:
       - "8080:80"

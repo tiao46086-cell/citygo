@@ -88,7 +88,7 @@
   <main class="cg-main">
     <div class="cg-login-wrap">
       <div class="cg-login-card">
-        <p class="cg-login-lead">用手机号登录。未注册的号码验证后会自动创建账户。也可以不填手机号，直接进入体验账号。体验账号不能用验证码登录。</p>
+        <p class="cg-login-lead">推荐点击“体验 CityGo”，无需手机号即可体验。验证码登录仅供开发演示，不会发送真实短信。体验账号不能用验证码登录。</p>
         <el-input placeholder="请输入手机号" v-model="form.phone"></el-input>
         <div class="cg-code-row">
           <el-input placeholder="请输入验证码" v-model="form.code"></el-input>
@@ -107,7 +107,7 @@
 <script src="./js/vue.js"></script>
 <script src="./js/axios.min.js"></script>
 <script src="./js/element.js"></script>
-<script src="./js/common.js?v=4"></script>
+<script src="./js/common.js?v=9"></script>
 <script>
   const app = new Vue({
     el: "#app",
@@ -177,21 +177,28 @@
           this.$message.error("手机号不能为空");
           return;
         }
-        axios.post("/user/code?phone=" + this.form.phone)
-          .then(() => {})
+        this.disabled = true;
+        this.codeBtnMsg = "发送中";
+        axios.post("/user/code", null, { params: { phone: this.form.phone } })
+          .then(() => {
+            let seconds = 60;
+            this.codeBtnMsg = seconds + "秒后可重发";
+            const taskId = setInterval(() => {
+              seconds--;
+              if (seconds === 0) {
+                clearInterval(taskId);
+                this.disabled = false;
+                this.codeBtnMsg = "发送验证码";
+              } else {
+                this.codeBtnMsg = seconds + "秒后可重发";
+              }
+            }, 1000);
+          })
           .catch(err => {
-            console.log(err);
+            this.disabled = false;
+            this.codeBtnMsg = "发送验证码";
             this.$message.error(err);
           });
-        this.disabled = true;
-        let i = 60;
-        this.codeBtnMsg = (i--) + "秒后可重发";
-        let taskId = setInterval(() => this.codeBtnMsg = (i--) + "秒后可重发", 1000);
-        setTimeout(() => {
-          this.disabled = false;
-          clearInterval(taskId);
-          this.codeBtnMsg = "发送验证码";
-        }, 59000);
       }
     }
   });

@@ -129,7 +129,7 @@
 <script src="./js/vue.js"></script>
 <script src="./js/axios.min.js"></script>
 <script src="./js/element.js"></script>
-<script src="./js/common.js?v=8"></script>
+<script src="./js/common.js?v=9"></script>
 <script src="./js/footer.js?v=7"></script>
 <script>
   const app = new Vue({
@@ -183,8 +183,9 @@
             this.queryUserInfo();
             this.queryBlogs();
           })
-          .catch(() => {
-            location.href = "/login.html";
+          .catch(err => {
+            this.blogsState = "error";
+            this.$message.error(err);
           })
       },
       goBack() {
