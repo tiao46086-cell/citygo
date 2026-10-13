@@ -10,6 +10,10 @@
   <link href="./css/main.css?v=7" rel="stylesheet">
   <link href="./css/citygo.css?v=8" rel="stylesheet">
   <style>
+    /* 身份请求完成前不展示个人页，避免未登录状态短暂闪现。 */
+    #app {
+      visibility: hidden;
+    }
     .cg-profile {
       display: flex;
       gap: 14px;
@@ -180,6 +184,7 @@
         axios.get("/user/me")
           .then(({data}) => {
             this.user = data || {};
+            document.getElementById("app").style.visibility = "visible";
             this.queryUserInfo();
             this.queryBlogs();
           })
