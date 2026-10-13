@@ -2,7 +2,7 @@
 
 当前代码修复、本机测试和本轮容器验收已通过，完整记录见 `V1_CONTAINER_ACCEPTANCE.md`；尚未完成公网部署验收。此清单只核对现有 v1.0，不扩展功能或技术栈。
 
-2026-10-13 最终本地验收：Java 41 项（Java 21、独立 citygo 库）和 Node 3 个脚本通过；独立全新 Compose 项目 `citygo-release-final` 构建启动成功。Nginx 18084 上 40 项 HTTP 检查通过，包含静态资源/favicon、中文查询、匿名 401、体验账号、管理员权限拒绝、普通订单支付/重复支付、真实 RabbitMQ 秒杀建单/重复抢购、上传/发布/点赞/收藏/评论/归属校验、退出和旧 token 失效。五个服务均核对 `unless-stopped`。Docker 引擎恢复时发现 Nginx 固定旧容器 IP 导致 502，已在 `deploy/nginx.conf` 加 Docker DNS 动态解析并重载后复验通过。浏览器自动审批超时，未把浏览器操作记为通过；公网域名、HTTPS、短信、真实支付和压测仍未验收。
+2026-10-13 最终本地验收：Java 41 项（Java 21、独立 citygo 库）和 Node 3 个脚本通过；独立全新 Compose 项目 `citygo-release-final` 构建启动成功。Nginx 18084 上 40 项 HTTP 检查通过，包含静态资源/favicon、中文查询、匿名 401、体验账号、管理员权限拒绝、普通订单支付/重复支付、真实 RabbitMQ 秒杀建单/重复抢购、上传/发布/点赞/收藏/评论/归属校验、退出和旧 token 失效。五个服务均核对 `unless-stopped`；重启五个服务后，新会话、已支付订单、未支付秒杀订单和上传图片持久化检查 4 项通过。Docker 引擎恢复时发现 Nginx 固定旧容器 IP 导致 502，已在 `deploy/nginx.conf` 加 Docker DNS 动态解析并重载后复验通过。浏览器自动审批超时，未把浏览器操作记为通过；公网域名、HTTPS、短信、真实支付和压测仍未验收。
 
 ## 已实际验证
 
