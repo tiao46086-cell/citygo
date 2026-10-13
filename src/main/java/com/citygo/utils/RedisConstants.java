@@ -49,7 +49,4 @@ public class RedisConstants {
     /** 当前用户上传过的相对路径，删除时核对 */
     public static final String UPLOAD_BLOG_KEY = "upload:blog:";
     public static final String BLOG_LIKED_KEY = "blog:liked:";
-    public static final String FEED_KEY = "feed:";
-    public static final String SHOP_GEO_KEY = "shop:geo:";
-    public static final String USER_SIGN_KEY = "sign:";
 }

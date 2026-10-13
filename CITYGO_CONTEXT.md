@@ -188,6 +188,12 @@ AdminGuardTest、BlogLikeFailureTest 为单元测试；SeckillLuaTest 和部分 
 
 ## 11. v1.0 收尾与对外描述
 
+2026-10-13 经确认完成五项小残留清理：登录 Controller、Service 接口与实现不再传递未使用的 HttpSession；删除 UserController 未使用的日志注解、common.js 旧 IP 注释、Windows Nginx 未使用的 upstream backend 和默认欢迎页 html/index.html。实际代理仍指向本机 8081，html/citygo 首页与 50x 错误页保留。11:39:29 在 Java 21、独立 citygo 测试库（13306）和 Redis（6379）上执行 `mvn -B -Dstyle.color=never -DforkCount=0 test`，41 项通过；MQ 自动消费与调度按原测试配置关闭。Node 参数测试 5 组通过，项目自带 Windows nginx.exe 的 `-t` 配置检查通过；本次未做 HTTP 登录或容器端到端验收。日志 `target/cleanup-small-tests.log`。
+
+2026-10-13 后续经确认清理：删除没有页面入口且依赖未实现 `/user/{id}`、`/blog/of/user` 接口的 `other-info.html`，删除后端不支持的密码登录页 `login2.html`、未引用的 ScrollResult、空 SeckillVoucherMapper XML，移除 LoginFormDTO.password 与无引用的共同关注 CSS；Java Mapper、UserInfo 和数据库表保留。11:32:27 在 Java 21、独立 citygo 测试库（13306）和 Redis（6379）上执行 clean test，41 项全部通过；MQ 自动消费和调度按既有测试配置关闭。Node 参数测试 5 组、保留页面 9 段内联 JavaScript 语法检查通过，未做本次浏览器或容器验收。原始日志 `target/cleanup-final-tests.log`。
+
+2026-10-13 经确认清理未使用课程代码：删除关注模块 Controller/Service/Mapper/Entity 空壳、未引用的 RedisData 和 PasswordEncoder，移除 Feed/GEO/签到常量及未调用的邮箱/验证码校验方法和密码正则。手机号校验、UserInfo 页面查询和 SQL 表保留。随后经确认移除 `other-info.html` 的关注按钮、共同关注页签、相关状态/方法/接口请求，以及不再使用的登录用户查询；用户资料和笔记展示保留。页面内联 JavaScript 语法检查通过，未进行浏览器全页面验收，也不能宣称已完成全仓库无用代码清理。11:10:05 在 Java 21、独立 citygo 测试库（宿主 13306）、Redis 6379 上执行 `mvn -B -Dstyle.color=never -DforkCount=0 clean test`，41 项通过；Spring 流程测试按既有配置关闭 MQ 自动消费和调度，不代表本次完成容器或端到端验收。Node 参数测试 5 组通过。该次日志曾保存在 `target/cleanup-tests.log`，后续 clean 已清除，历史结论保留在本文。
+
 2026-10-13 后续数据库命名收尾：当前配置、SQL 和导入脚本默认库名统一为 `citygo`，Compose 项目名固定为 `citygo`，移除含旧课程页面和内嵌 Git 仓库的重复 Nginx 压缩包。先备份独立验收数据库，再复制到 `citygo`，Java 21 的 41 项测试全部通过（10:36:40，宿主 MySQL 13306）；Node 5 组通过。另起 `citygo-schema-check` 空卷，三份 SQL 初始化成功，应用连接新库，在 18083 端口的 13 项 HTTP/MQ 检查通过。此空库只有 `citygo` 业务库。原部署、原备份、学习资料、Git 历史和本地工作区目录尚未清理，不能宣称机器与历史记录中的旧名称已经全部消失。切换旧部署须先备份、迁移并核对数据，不能直接换卷后视作升级成功。
 
 2026-10-13 命名迁移后的验证：Java 21 执行 `mvn -B -Dstyle.color=never -DforkCount=0 test`，在独立 Docker MySQL（宿主 `13306`）、Redis（`6379`）和 RabbitMQ 环境中 41 项全部通过；独立库预置了测试代码所需的用户 1013、1014，不能据此推断生产库包含这些用户。Node 参数测试 5 组通过。Java 8 Dockerfile 镜像构建成功；新包名应用和 `html/citygo` 页面启动后，首页、静态资源、图片、商户/分类/券查询、体验登录、普通下单、秒杀消息入库、模拟支付、退出共 13 项 HTTP 检查通过。旧数据库名 `citygo`、旧数据卷未迁移或删除。

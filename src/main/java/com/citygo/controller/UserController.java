@@ -7,12 +7,10 @@ import com.citygo.entity.UserInfo;
 import com.citygo.service.IUserInfoService;
 import com.citygo.service.IUserService;
 import com.citygo.utils.UserHolder;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpSession;
 
 /**
  * <p>
@@ -22,7 +20,6 @@ import javax.servlet.http.HttpSession;
  * @author 虎哥
  * @since 2021-12-22
  */
-@Slf4j
 @RestController
 @RequestMapping("/user")
 public class UserController {
@@ -43,11 +40,11 @@ public class UserController {
 
     /**
      * 登录功能
-     * @param loginForm 登录参数，包含手机号、验证码；或者手机号、密码
+     * @param loginForm 登录参数，包含手机号和验证码
      */
     @PostMapping("/login")
-    public Result login(@RequestBody LoginFormDTO loginForm, HttpSession session){
-        return userService.login(loginForm, session);
+    public Result login(@RequestBody LoginFormDTO loginForm){
+        return userService.login(loginForm);
     }
 
     /**

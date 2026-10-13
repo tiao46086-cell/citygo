@@ -5,7 +5,6 @@ import com.citygo.dto.LoginFormDTO;
 import com.citygo.dto.Result;
 import com.citygo.entity.User;
 
-import javax.servlet.http.HttpSession;
 
 /**
  * <p>
@@ -19,7 +18,7 @@ public interface IUserService extends IService<User> {
 
     Result sendCode(String phone);
 
-    Result login(LoginFormDTO loginForm, HttpSession session);
+    Result login(LoginFormDTO loginForm);
 
     /**
      * 分配一个体验用户，返回 token。手机号不能发验证码。同一 IP 有次数限制。
